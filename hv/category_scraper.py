@@ -138,6 +138,38 @@ SITES = {
     "poshmark": dict(
         match=r"(^|\.)poshmark\.", search="https://{host}/search?query={q}", paging="scroll",
         card="[data-et-prop-listing_id], .card", link_pattern=r"/listing/"),
+    # Resale sites the vnyx resale lookup reads (22 Nov 2026). Search URL + what a product link looks like;
+    # cards are found automatically around those links.
+    "vestiairecollective": dict(
+        match=r"(^|\.)vestiairecollective\.", search="https://{host}/search/?q={q}&page={page}", paging="page",
+        page_start=1, link_pattern=r"-\d{6,}\.shtml"),
+    "marktplaats": dict(
+        match=r"(^|\.)marktplaats\.nl", search="https://www.marktplaats.nl/q/{qslug}/p/{page}/", paging="page",
+        page_start=1, link_pattern=r"/v/[^/]+/[^/]+/[am]\d+"),
+    "2dehands": dict(
+        match=r"(^|\.)2dehands\.be", search="https://www.2dehands.be/q/{qslug}/p/{page}/", paging="page",
+        page_start=1, link_pattern=r"/v/[^/]+/[^/]+/[am]\d+"),
+    "kleinanzeigen": dict(
+        match=r"(^|\.)kleinanzeigen\.de", search="https://www.kleinanzeigen.de/s-seite:{page}/{qslug}/k0",
+        paging="page", page_start=1, link_pattern=r"/s-anzeige/"),
+    "wallapop": dict(
+        match=r"(^|\.)wallapop\.com", search="https://{host}/app/search?keywords={q}", paging="scroll",
+        link_pattern=r"/item/[\w-]+"),
+    "subito": dict(
+        match=r"(^|\.)subito\.it", search="https://www.subito.it/annunci-italia/vendita/usato/?q={q}&o={page}",
+        paging="page", page_start=1, link_pattern=r"-\d{6,}\.htm"),
+    "tise": dict(
+        match=r"(^|\.)tise\.com", search="https://tise.com/search?q={q}", paging="scroll",
+        link_pattern=r"/p/|/product/"),
+    "thredup": dict(
+        match=r"(^|\.)thredup\.com", search="https://www.thredup.com/products?search_text={q}&page={page}",
+        paging="page", page_start=1, link_pattern=r"/product/"),
+    "mercari": dict(
+        match=r"(^|\.)mercari\.com", search="https://www.mercari.com/search/?keyword={q}", paging="scroll",
+        link_pattern=r"/item/m\d+"),
+    "sellpy": dict(
+        match=r"(^|\.)sellpy\.", search="https://{host}/search?query={q}", paging="scroll",
+        link_pattern=r"/item/[\w-]{6,}"),
 }
 
 GENERIC_SEARCH_PATHS = ["/search?q={q}", "/search?type=product&q={q}", "/search?query={q}",
@@ -333,6 +365,10 @@ def clean_url(url: str) -> str:
 def normalize_card(c: dict, site: str, category: str, page_no: int, rank: int,
                    cfg: dict | None = None) -> dict | None:
     url = clean_url(c["url"])
+    # A site with a known product-link shape: anything else on the page (store, profile, category links that
+    # also carry a picture) is not a product (Sellpy, 22 Nov 2026: a store link was taken as the first item).
+    if (cfg or {}).get("link_pattern") and not re.search(cfg["link_pattern"], url, re.I):
+        return None
     title = (c.get("title") or "").strip() or None
     if not c.get("brand") and (cfg or {}).get("brand_first_line"):
         lines = [l.strip() for l in (c.get("card_text") or "").split("\n") if l.strip()]

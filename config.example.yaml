@@ -1,7 +1,7 @@
 # Product harvester configuration. Copy to config.yaml and edit.
 # ${VAR} values are read from the environment (/etc/harvester.env when run by systemd).
 
-daily_total_limit: 200          # hard cap across all jobs per day
+daily_total_limit: 300          # hard cap across all jobs per day
 
 parallel_sites: 3               # sites scraped at the same time, one thread (and one Chrome) each. Each site
                                 # still gets the same polite pace - this shortens a run, it does not add load
@@ -50,7 +50,11 @@ ebay:                           # free keys: https://developer.ebay.com/my/keys
 jobs:
   # type: auto (default) -> eBay API if keys are set, Shopify JSON if the store is Shopify, else generic
   # fetch (generic only): auto (HTTP first, browser if data incomplete) | http | browser
-  - name: pangaia-track-pants
+  # Tested 22 Nov 2026 (one search + one product page each). "Mac" = tested from a home connection with
+  # headless Chrome; the server runs real Chrome in a virtual display, so re-check with `harvester.py check --browser`.
+
+  # --- working from the server (22 Nov) ---
+  - name: pangaia-track-pants      # Shopify feed, no browser
     site: https://pangaia.com
     category: track pants
     per_day: 30
@@ -60,33 +64,90 @@ jobs:
     category: jacket
     per_day: 40
 
-  - name: flipkart-jeans
-    site: https://www.flipkart.com
-    category: jeans
-    per_day: 40
-
   - name: grailed-jackets
     site: https://www.grailed.com
     category: jacket
     per_day: 30
     fetch: browser
 
-  - name: ebay-jackets
-    site: https://www.ebay.com
+  # --- working from the Mac (22 Nov) ---
+  - name: poshmark-jackets         # brand, price, up to 30 photos
+    site: https://poshmark.com
     category: jacket
-    per_day: 40
-    type: ebay_api              # eBay blocks most VPS IPs - the official API never does
-    # category_id: "57988"      # Men's Coats, Jackets & Vests
-    enabled: true
+    per_day: 10
 
-  # - name: amazon-jeans        # Amazon blocks VPS IPs -> needs proxies
-  #   site: https://www.amazon.in
-  #   category: jeans
-  #   per_day: 30
+  - name: sellpy-jassen            # brand, price, up to 30 photos
+    site: https://www.sellpy.nl
+    category: jas
+    per_day: 10
 
-  # Any other site works too; if its search URL is unusual, give it:
-  # - name: myshop-shirts
-  #   site: https://www.myshop.com
-  #   category: shirts
-  #   search_url: "https://www.myshop.com/find?term={query}&page={page}"
-  #   per_day: 20
+  - name: marktplaats-jassen       # works, but listings carry no brand -> Stock refuses them (no brand)
+    site: https://www.marktplaats.nl
+    category: jas
+    per_day: 10
+
+  - name: 2dehands-jassen          # same as Marktplaats (no brand on the listing)
+    site: https://www.2dehands.be
+    category: jas
+    per_day: 10
+
+  - name: subito-giacche           # works; no brand field on the listing
+    site: https://www.subito.it
+    category: giacca
+    per_day: 10
+
+  # --- blocked headless Chrome from the Mac: try from the server (check --browser) ---
+  - name: depop-jackets            # Mac: HTTP 403
+    site: https://www.depop.com
+    category: jacket
+    per_day: 10
+
+  - name: etsy-vintage-jackets     # Mac: HTTP 403
+    site: https://www.etsy.com
+    category: vintage jacket
+    per_day: 10
+
+  - name: kleinanzeigen-jacken     # Mac: HTTP 403
+    site: https://www.kleinanzeigen.de
+    category: jacke
+    per_day: 10
+
+  - name: vestiaire-jackets        # Mac: bot wall on the search page
+    site: https://www.vestiairecollective.com
+    category: jacket
+    per_day: 10
+
+  - name: thredup-jackets          # Mac: Cloudflare 403
+    site: https://www.thredup.com
+    category: jacket
+    per_day: 10
+
+  - name: mercari-jackets          # Mac: bot wall
+    site: https://www.mercari.com
+    category: jacket
+    per_day: 10
+
+  - name: wallapop-chaquetas       # Mac: bot wall
+    site: https://es.wallapop.com
+    category: chaqueta
+    per_day: 10
+
+  - name: zalando-jassen           # Mac: blank page (Akamai). Mostly NEW items (retail prices)
+    site: https://www.zalando.nl
+    category: jas
+    search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
+    per_day: 10
+
+  # --- not scrapable this way ---
+  - name: tise-jakker              # app-style site: product links are not in the page
+    site: https://tise.com
+    category: jakke
+    per_day: 10
+    enabled: false
+  # Vide Dressing: merged into Vinted (2022); its domain no longer serves a valid certificate - dropped.
+
+  # - name: ebay-jackets           # eBay blocks server IPs - needs the official API keys (EBAY_CLIENT_ID/SECRET)
+  #   site: https://www.ebay.com
+  #   category: jacket
+  #   per_day: 40
+  #   type: ebay_api
