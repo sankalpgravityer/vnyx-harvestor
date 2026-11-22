@@ -1,0 +1,5 @@
+seleniumbase>=4.30        # stealth Chrome (UC mode) - github.com/seleniumbase/SeleniumBase
+curl_cffi>=0.7            # Chrome TLS/HTTP2 fingerprint for plain requests - github.com/lexiforest/curl_cffi
+selenium>=4.20
+requests>=2.31
+PyYAML>=6.0

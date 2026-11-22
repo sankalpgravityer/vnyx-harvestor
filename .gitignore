@@ -1,0 +1,7 @@
+data/
+data-local/
+.venv/
+downloaded_files/
+__pycache__/
+config.yaml
+config.local.yaml

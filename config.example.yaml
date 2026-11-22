@@ -1,0 +1,82 @@
+# Product harvester configuration. Copy to config.yaml and edit.
+# ${VAR} values are read from the environment (/etc/harvester.env when run by systemd).
+
+daily_total_limit: 200          # hard cap across all jobs per day
+
+schedule:
+  runs_per_day: 5               # must match the systemd timer (deploy/harvester.timer); quota is split evenly
+
+storage:
+  dir: data                     # SQLite DB, images/, exports/, logs/, browser profiles/
+
+politeness:                     # <- this section is what keeps your IP clean
+  min_delay: 12                 # seconds between two requests to the SAME site (random in [min, max])
+  max_delay: 35
+  long_pause_every: 15          # after ~15 requests to a site, take a longer break...
+  long_pause_seconds: [60, 180] # ...of 1-3 minutes
+  max_requests_per_domain_per_day: 150
+  respect_robots: true
+  cooldown_hours: [6, 24, 72]   # first block signal -> 6h pause for that site, then 24h, then 72h
+
+browser:
+  mode: auto                    # auto: xvfb on Linux, visible window on macOS/Windows
+                                # xvfb = real Chrome in a virtual display (no screen needed, hardest to detect)
+                                # headless = Chrome --headless=new (lighter, easier to detect)
+  restart_every: 40             # fresh browser after N pages
+
+http:
+  impersonate: chrome           # curl_cffi TLS/HTTP2 fingerprint
+
+# Optional. Only needed for sites that block datacenter/VPS IP ranges (eBay, Amazon, some Cloudflare sites).
+# Use residential or mobile proxies. Each site always gets the same proxy (a consistent "visitor").
+proxies: []
+#  - http://user:pass@gate.provider.com:7000
+
+ebay:                           # free keys: https://developer.ebay.com/my/keys
+  client_id: ${EBAY_CLIENT_ID}
+  client_secret: ${EBAY_CLIENT_SECRET}
+  marketplace: EBAY_US
+
+jobs:
+  # type: auto (default) -> eBay API if keys are set, Shopify JSON if the store is Shopify, else generic
+  # fetch (generic only): auto (HTTP first, browser if data incomplete) | http | browser
+  - name: pangaia-track-pants
+    site: https://pangaia.com
+    category: track pants
+    per_day: 30
+
+  - name: vinted-jackets
+    site: https://www.vinted.nl
+    category: jacket
+    per_day: 40
+
+  - name: flipkart-jeans
+    site: https://www.flipkart.com
+    category: jeans
+    per_day: 40
+
+  - name: grailed-jackets
+    site: https://www.grailed.com
+    category: jacket
+    per_day: 30
+    fetch: browser
+
+  - name: ebay-jackets
+    site: https://www.ebay.com
+    category: jacket
+    per_day: 40
+    type: ebay_api              # eBay blocks most VPS IPs - the official API never does
+    # category_id: "57988"      # Men's Coats, Jackets & Vests
+    enabled: true
+
+  # - name: amazon-jeans        # Amazon blocks VPS IPs -> needs proxies
+  #   site: https://www.amazon.in
+  #   category: jeans
+  #   per_day: 30
+
+  # Any other site works too; if its search URL is unusual, give it:
+  # - name: myshop-shirts
+  #   site: https://www.myshop.com
+  #   category: shirts
+  #   search_url: "https://www.myshop.com/find?term={query}&page={page}"
+  #   per_day: 20

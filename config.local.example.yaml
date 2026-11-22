@@ -1,0 +1,57 @@
+# Local test config (Mac / laptop). Copy to config.local.yaml.
+# Shorter delays than the server config so a test finishes in minutes. Still polite: keep runs small (--max 2..5).
+
+daily_total_limit: 50
+
+schedule:
+  runs_per_day: 1
+
+storage:
+  dir: data-local               # separate from the server's data/ folder - delete it any time to start fresh
+
+politeness:
+  min_delay: 6                  # server default is 12-35 s
+  max_delay: 12
+  long_pause_every: 0
+  max_requests_per_domain_per_day: 60
+  respect_robots: true
+  cooldown_hours: [6, 24, 72]
+
+browser:
+  mode: auto                    # Mac: a normal Chrome window opens (most realistic). Use "headless" for no window.
+
+proxies: []
+
+ebay:
+  client_id: ${EBAY_CLIENT_ID}
+  client_secret: ${EBAY_CLIENT_SECRET}
+  marketplace: EBAY_US
+
+jobs:
+  - name: pangaia-track-pants   # Shopify store -> product feed, no browser needed
+    site: https://pangaia.com
+    category: track pants
+    per_day: 10
+
+  - name: vinted-jackets        # stealth browser
+    site: https://www.vinted.nl
+    category: jacket
+    per_day: 10
+
+  - name: flipkart-jeans        # plain HTTP (schema.org data on product pages)
+    site: https://www.flipkart.com
+    category: jeans
+    per_day: 10
+
+  - name: grailed-jackets
+    site: https://www.grailed.com
+    category: jacket
+    per_day: 10
+    fetch: browser
+
+  # From a home connection eBay usually works without the API too (it only blocks server IPs):
+  # - name: ebay-jackets
+  #   site: https://www.ebay.com
+  #   category: jacket
+  #   per_day: 10
+  #   type: generic

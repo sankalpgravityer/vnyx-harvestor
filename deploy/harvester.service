@@ -1,0 +1,16 @@
+[Unit]
+Description=Product harvester (one scheduled run)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=-/etc/harvester.env
+ExecStart=__APP_DIR__/.venv/bin/python __APP_DIR__/harvester.py run
+TimeoutStartSec=3h
+Nice=10
+MemoryMax=2500M
+# kill leftover Chrome / Xvfb processes if a run crashes
+KillMode=control-group

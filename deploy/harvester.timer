@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the product harvester 5x a day at slightly random times
+
+[Timer]
+# 5 runs/day (matches schedule.runs_per_day in config.yaml). Each fires up to 45 min late at random,
+# so the sites never see a fixed clock-work pattern.
+OnCalendar=*-*-* 07,10,13,16,19:00:00
+RandomizedDelaySec=45min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
