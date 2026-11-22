@@ -102,6 +102,14 @@ code or the reason it did not) is kept in `data/harvester.db`, table `stock_push
 
 Tests: `.venv/bin/pip install pytest && .venv/bin/python -m pytest -q tests`
 
+## Several sites at once
+
+`parallel_sites: 3` in `config.yaml` (or `run --parallel 3`) scrapes up to three sites at the same time: one thread,
+one Chrome and one HTTP identity per site, all in the same virtual display. Jobs on the same site still run one
+after another, so every site sees exactly the same polite pace as before. A run then takes about as long as its
+slowest site instead of the sum of all of them. Each browser site needs ~500 MB RAM (the systemd unit allows
+4 GB). Log lines carry the thread name (`site_0`, `site_1` ...). `parallel_sites: 1` = one site after another.
+
 ## How it avoids getting your IP blocked
 
 | Measure | What it does |
@@ -151,6 +159,7 @@ pages don't use one.
 
 ```yaml
 daily_total_limit: 200
+parallel_sites: 3                    # sites at the same time, one thread each
 schedule: {runs_per_day: 5}          # keep in sync with deploy/harvester.timer
 politeness: {min_delay: 12, max_delay: 35, max_requests_per_domain_per_day: 150, cooldown_hours: [6, 24, 72]}
 browser: {mode: auto}                # auto = Xvfb on Linux, visible window on Mac | xvfb | visible | headless

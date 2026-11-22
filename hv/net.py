@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 
 from curl_cffi import requests as creq
@@ -72,6 +73,11 @@ class Http:
     def get(self, url, **kw) -> tuple[int, str]:
         r = self.session(domain_of(url)).get(url, **kw)
         return r.status_code, r.text
+
+
+# Chrome is started one at a time: SeleniumBase's UC mode patches its driver file at launch, and two threads
+# patching it together can corrupt it. Pages then load in parallel.
+_LAUNCH_LOCK = threading.Lock()
 
 
 class Browser:
@@ -138,7 +144,8 @@ class Browser:
                 kw["headless2"] = True
             else:
                 self._ensure_display()
-            self.driver = Driver(**kw)
+            with _LAUNCH_LOCK:
+                self.driver = Driver(**kw)
             self._verify_mode(kw["user_data_dir"])
             self.driver.set_page_load_timeout(60)
             self.driver.set_script_timeout(30)

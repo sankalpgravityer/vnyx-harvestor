@@ -5,6 +5,7 @@ Product harvester - headless, scheduled, polite multi-site product scraper for a
   python harvester.py check            # pre-flight: is each site reachable from THIS server's IP?
   python harvester.py run              # scrape today's share of every job (run by the systemd timer)
   python harvester.py run --job vinted-jackets --max 5
+  python harvester.py run --parallel 3 # one thread per site (each site still sees the same polite pace)
   python harvester.py export           # today's products -> data/exports/<day>/products.csv/.json
   python harvester.py status           # quotas, cooldowns, block events, what reached Stock
   python harvester.py push --dry-run   # send products to the Stock API (bulk upload) - dry run: validate only
@@ -25,7 +26,9 @@ import random
 import re
 import sys
 import tempfile
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
@@ -62,7 +65,7 @@ def load_config(path):
 
 
 def setup_logging(cfg, verbose):
-    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", "%Y-%m-%d %H:%M:%S")
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(threadName)-10s %(message)s", "%Y-%m-%d %H:%M:%S")
     log.setLevel(logging.DEBUG if verbose else logging.INFO)
     fh = RotatingFileHandler(os.path.join(cfg["storage"]["dir"], "logs", "harvester.log"),
                              maxBytes=5_000_000, backupCount=5)
@@ -83,6 +86,18 @@ class Ctx:
         self.browser = Browser(cfg, os.path.join(d, "profiles"))
         self.pages_dir = os.path.join(tempfile.gettempdir(), "harvester-pages")   # scratch, not kept
         self.tier_memory: dict = {}
+
+    def worker(self) -> "Ctx":
+        """A context for one site thread: its own SQLite connection (WAL lets them write in turn), HTTP sessions,
+        guard and browser. The virtual display is the main context's, shared by every thread."""
+        w = object.__new__(Ctx)
+        d = self.cfg["storage"]["dir"]
+        w.cfg, w.pages_dir, w.tier_memory = self.cfg, self.pages_dir, {}
+        w.db = DB(os.path.join(d, "harvester.db"))
+        w.http = Http(self.cfg)
+        w.guard = Guard(w.db, self.cfg, http_get=w.http.get, ua=self.guard.ua)
+        w.browser = Browser(self.cfg, os.path.join(d, "profiles"))
+        return w
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +128,16 @@ def to_output(row) -> dict:
     return out
 
 
+_write_lock = threading.Lock()
+
+
 def write_json(ctx, day):
     """data/exports/<day>/products.json - rewritten after every product, so it is always up to date."""
+    with _write_lock:                          # site threads write the same file
+        return _write_json(ctx, day)
+
+
+def _write_json(ctx, day):
     rows = ctx.db.products(None if day == "all" else day)
     out = os.path.join(ctx.cfg["storage"]["dir"], "exports", day)
     os.makedirs(out, exist_ok=True)
@@ -200,14 +223,21 @@ def cmd_run(ctx, a):
     random.shuffle(jobs)                                   # no fixed visiting pattern
     total_cap = int(ctx.cfg.get("daily_total_limit", 200))
     t0, total = time.time(), 0
+    groups = group_by_site(jobs)
+    workers = min(len(groups), max(1, int(a.parallel or ctx.cfg.get("parallel_sites", 1))))
     try:
-        for j in jobs:
-            budget = total_cap - ctx.db.count_today()
-            if budget <= 0:
-                log.info("daily_total_limit (%d) reached", total_cap)
-                break
-            total += run_job(ctx, j, budget)
-            ctx.browser.close()
+        if workers <= 1:
+            for j in jobs:
+                total += run_site(ctx, [j], total_cap)
+        else:
+            # One thread per site, never two on the same site: each site still sees one patient visitor,
+            # so this changes the run time (about the slowest site instead of the sum), not the IP risk.
+            if ctx.browser.mode == "xvfb":
+                ctx.browser._ensure_display()             # one virtual display, shared by every thread
+            log.info("running %d sites in parallel (%d threads)", len(groups), workers)
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="site") as ex:
+                futures = [ex.submit(run_site_thread, ctx, g, total_cap) for g in groups.values()]
+                total = sum(f.result() for f in futures)
     finally:
         ctx.browser.shutdown()
     log.info("run finished: %d products in %.1f min (today total %d)", total, (time.time() - t0) / 60,
@@ -216,6 +246,40 @@ def cmd_run(ctx, a):
     scfg = stock_push.stock_cfg(ctx.cfg)
     if scfg["auto_push"] and scfg["api_key"]:
         cmd_push(ctx, argparse.Namespace(dry_run=False, retry_failed=False, day=None))
+
+
+def group_by_site(jobs) -> dict:
+    """Jobs grouped by domain, in their (shuffled) order: one thread per group."""
+    groups: dict = {}
+    for j in jobs:
+        dom = domain_of(j["site"] if "://" in j["site"] else "https://" + j["site"])
+        groups.setdefault(dom, []).append(j)
+    return groups
+
+
+def run_site(ctx, jobs, total_cap) -> int:
+    """This site's jobs, one after the other."""
+    saved = 0
+    for j in jobs:
+        budget = total_cap - ctx.db.count_today()
+        if budget <= 0:
+            log.info("daily_total_limit (%d) reached", total_cap)
+            break
+        saved += run_job(ctx, j, budget)
+        ctx.browser.close()
+    return saved
+
+
+def run_site_thread(ctx, jobs, total_cap) -> int:
+    w = ctx.worker()
+    try:
+        return run_site(w, jobs, total_cap)
+    except Exception as e:                                # one site's crash never stops the others
+        log.error("[%s] site thread stopped: %s", jobs[0]["name"], e)
+        return 0
+    finally:
+        w.browser.shutdown()                              # its Chrome; the display is the main context's
+        w.db.c.close()
 
 
 def cmd_check(ctx, a):
@@ -325,6 +389,7 @@ def main():
     ap.add_argument("--config", "-c", default=os.path.join(ROOT, "config.yaml"))
     ap.add_argument("--job", help="only this job")
     ap.add_argument("--max", type=int, help="at most N products per job in this run")
+    ap.add_argument("--parallel", type=int, help="run: sites at the same time (default: parallel_sites, 1)")
     ap.add_argument("--day", help="export: YYYY-MM-DD or 'all' (default today)")
     ap.add_argument("--browser", action="store_true", help="check: also test the stealth browser per site")
     ap.add_argument("--dry-run", action="store_true", help="push: Stock validates and matches, writes nothing")

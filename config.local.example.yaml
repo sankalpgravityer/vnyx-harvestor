@@ -3,6 +3,8 @@
 
 daily_total_limit: 50
 
+parallel_sites: 3               # one thread per site
+
 schedule:
   runs_per_day: 1
 

@@ -11,6 +11,7 @@ EnvironmentFile=-/etc/harvester.env
 ExecStart=__APP_DIR__/.venv/bin/python __APP_DIR__/harvester.py run
 TimeoutStartSec=3h
 Nice=10
-MemoryMax=2500M
+# up to 3 Chrome browsers with parallel_sites: 3
+MemoryMax=4000M
 # kill leftover Chrome / Xvfb processes if a run crashes
 KillMode=control-group

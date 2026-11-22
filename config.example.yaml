@@ -3,6 +3,10 @@
 
 daily_total_limit: 200          # hard cap across all jobs per day
 
+parallel_sites: 3               # sites scraped at the same time, one thread (and one Chrome) each. Each site
+                                # still gets the same polite pace - this shortens a run, it does not add load
+                                # on any site. ~500 MB RAM per browser site. 1 = one site after another.
+
 schedule:
   runs_per_day: 5               # must match the systemd timer (deploy/harvester.timer); quota is split evenly
 
