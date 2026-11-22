@@ -61,6 +61,14 @@ def load_config(path):
         st.setdefault(k, d)
     base = st["dir"] if os.path.isabs(st["dir"]) else os.path.join(ROOT, st["dir"])
     st["dir"] = base
+    # A job's own `proxy:` / `politeness:` apply to its site (22 Nov 2026): a residential proxy only for the
+    # sites that block the server's IP, a slower pace only for the sites that need one.
+    for j in cfg.get("jobs") or []:
+        dom = domain_of(j["site"] if "://" in j["site"] else "https://" + j["site"])
+        if j.get("proxy"):
+            cfg.setdefault("site_proxies", {})[dom] = j["proxy"]
+        if isinstance(j.get("politeness"), dict):
+            cfg.setdefault("site_politeness", {}).setdefault(dom, {}).update(j["politeness"])
     for sub in ("exports", "profiles", "logs"):
         os.makedirs(os.path.join(base, sub), exist_ok=True)
     return cfg

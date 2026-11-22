@@ -407,10 +407,46 @@ def normalize_card(c: dict, site: str, category: str, page_no: int, rank: int,
 
 def collect_cards(driver, cfg) -> list[dict]:
     try:
-        return driver.execute_script(CARDS_JS, js_cfg(cfg)) or []
+        cards = driver.execute_script(CARDS_JS, js_cfg(cfg)) or []
     except Exception as e:
         print(f"   [!] card extraction error: {e}")
-        return []
+        cards = []
+    if not cards and (cfg or {}).get("link_pattern"):
+        try:
+            cards = embedded_cards(driver.page_source, driver.current_url, cfg["link_pattern"])
+            if cards:
+                print(f"   (product links read from the page's data: {len(cards)})")
+        except Exception:
+            pass
+    return cards
+
+
+def embedded_cards(html: str, page_url: str, link_pattern: str, limit: int = 200) -> list[dict]:
+    """Product URLs a page carries in its own data (JSON in <script>) when its tiles are not rendered as links
+    (Vestiaire, 22 Nov 2026: 10,000 hits, 64 product URLs in the page data, no product anchors)."""
+    from urllib.parse import urljoin
+    text = html.replace("\\u002F", "/").replace("\\/", "/")
+    host = urlparse(page_url).netloc
+    base_dom = ".".join(host.split(".")[-2:])
+    out, seen = [], set()
+    for m in re.finditer(r'(?:https?:)?//[^\s"\'<>\\]+|/[A-Za-z0-9][^\s"\'<>\\]{3,300}', text):
+        u = m.group(0)
+        u = ("https:" + u) if u.startswith("//") else urljoin(page_url, u)
+        p = urlparse(u)
+        if not p.netloc.endswith(base_dom) or not re.search(link_pattern, p.path + ("?" + p.query if p.query else ""), re.I):
+            continue
+        u = u.split("#")[0]
+        if u in seen:
+            continue
+        seen.add(u)
+        slug = p.path.rstrip("/").rsplit("/", 1)[-1]
+        title = re.sub(r"[-_]+", " ", re.sub(r"(-\d{5,})?\.\w+$", "", slug)).strip().capitalize() or None
+        out.append({"url": u, "title": title, "brand": None, "subtitle": None, "price_text": None, "mrp_text": None,
+                    "rating_text": None, "reviews_text": None, "image": None, "image_alt": None, "item_id": None,
+                    "sponsored": False, "card_text": ""})
+        if len(out) >= limit:
+            break
+    return out
 
 
 def light_scroll(driver, rounds=6, pause=0.6):

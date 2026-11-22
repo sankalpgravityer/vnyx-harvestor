@@ -45,6 +45,10 @@ class Guard:
         self.http_get = http_get                 # used to fetch robots.txt with the same TLS fingerprint
         self.ua = ua
         self._robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+        # Per-site pace (22 Nov 2026: Grailed raised a bot check after ~30 requests at the default pace).
+        # cfg["site_politeness"] = {domain: {min_delay, max_delay, long_pause_every, long_pause_seconds,
+        # max_requests_per_domain_per_day}}; built by harvester.load_config from each job's `politeness:`.
+        self.site = {k.lower().removeprefix("www."): v for k, v in (cfg.get("site_politeness") or {}).items()}
         self._count: dict[str, int] = {}
 
     # ---------- status ----------
@@ -55,15 +59,26 @@ class Guard:
         left = (datetime.fromisoformat(d["cooldown_until"]) - datetime.now(timezone.utc)).total_seconds()
         return max(0, left)
 
+    def _site(self, domain: str, key: str, default):
+        for dom, conf in self.site.items():
+            if domain == dom or domain.endswith("." + dom):
+                if key in conf:
+                    return conf[key]
+        return default
+
+    def cap(self, domain: str) -> int:
+        return int(self._site(domain, "max_requests_per_domain_per_day", self.daily_cap))
+
     def usable(self, domain: str) -> bool:
         d = self.db.domain(domain)
-        return self.cooldown_left(domain) == 0 and d["requests_today"] < self.daily_cap
+        return self.cooldown_left(domain) == 0 and d["requests_today"] < self.cap(domain)
 
     def next_allowed_in(self, domain: str) -> float:
         d = self.db.domain(domain)
         if not d["last_request"]:
             return 0
-        gap = random.uniform(self.min_delay, self.max_delay)
+        gap = random.uniform(float(self._site(domain, "min_delay", self.min_delay)),
+                             float(self._site(domain, "max_delay", self.max_delay)))
         elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(d["last_request"])).total_seconds()
         return max(0, gap - elapsed)
 
@@ -93,13 +108,14 @@ class Guard:
         if left > 0:
             raise DomainBlocked(f"{dom} cooling down for {left / 3600:.1f}h more")
         d = self.db.domain(dom)
-        if d["requests_today"] >= self.daily_cap:
-            raise DomainBlocked(f"{dom} reached its daily cap of {self.daily_cap} requests")
+        if d["requests_today"] >= self.cap(dom):
+            raise DomainBlocked(f"{dom} reached its daily cap of {self.cap(dom)} requests")
         if sleep:
             wait = self.next_allowed_in(dom)
             self._count[dom] = self._count.get(dom, 0) + 1
-            if self.long_pause_every and self._count[dom] % self.long_pause_every == 0:
-                wait += random.uniform(*self.long_pause)
+            every = int(self._site(dom, "long_pause_every", self.long_pause_every))
+            if every and self._count[dom] % every == 0:
+                wait += random.uniform(*self._site(dom, "long_pause_seconds", self.long_pause))
             if wait > 0:
                 log.debug("waiting %.0fs before %s", wait, dom)
                 time.sleep(wait)

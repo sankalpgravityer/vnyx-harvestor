@@ -33,7 +33,8 @@ http:
 
 # Optional. Only needed for sites that block datacenter/VPS IP ranges (eBay, Amazon, some Cloudflare sites).
 # Use residential or mobile proxies. Each site always gets the same proxy (a consistent "visitor").
-proxies: []
+proxies: []                     # shared proxies for every site (sticky per site) - usually leave empty and give
+                                # only the sites that block the server a `proxy:` of their own (see jobs)
 #  - http://user:pass@gate.provider.com:7000
 
 stock:                          # where products go: the Stock API's Product Master (POST /products/bulk)
@@ -64,11 +65,12 @@ jobs:
     category: jacket
     per_day: 40
 
-  - name: grailed-jackets
+  - name: grailed-jackets          # bot check after ~30 requests at the default pace (22 Nov) -> slower here
     site: https://www.grailed.com
     category: jacket
-    per_day: 30
+    per_day: 15
     fetch: browser
+    politeness: {min_delay: 40, max_delay: 90, long_pause_every: 8, max_requests_per_domain_per_day: 40}
 
   # --- working from the Mac (22 Nov) ---
   - name: poshmark-jackets         # brand, price, up to 30 photos
@@ -96,47 +98,60 @@ jobs:
     category: giacca
     per_day: 10
 
-  # --- blocked headless Chrome from the Mac: try from the server (check --browser) ---
+  # --- server check 22 Nov: OK with the virtual-display browser ---
   - name: depop-jackets            # Mac: HTTP 403
     site: https://www.depop.com
     category: jacket
     per_day: 10
 
-  - name: etsy-vintage-jackets     # Mac: HTTP 403
-    site: https://www.etsy.com
-    category: vintage jacket
-    per_day: 10
 
   - name: kleinanzeigen-jacken     # Mac: HTTP 403
     site: https://www.kleinanzeigen.de
     category: jacke
     per_day: 10
 
-  - name: vestiaire-jackets        # Mac: bot wall on the search page
+  - name: vestiaire-jackets        # product links read from the page data (tiles are not links)
     site: https://www.vestiairecollective.com
     category: jacket
     per_day: 10
 
-  - name: thredup-jackets          # Mac: Cloudflare 403
-    site: https://www.thredup.com
-    category: jacket
-    per_day: 10
-
-  - name: mercari-jackets          # Mac: bot wall
-    site: https://www.mercari.com
-    category: jacket
-    per_day: 10
-
-  - name: wallapop-chaquetas       # Mac: bot wall
-    site: https://es.wallapop.com
-    category: chaqueta
-    per_day: 10
 
   - name: zalando-jassen           # Mac: blank page (Akamai). Mostly NEW items (retail prices)
     site: https://www.zalando.nl
     category: jas
     search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
     per_day: 10
+
+  # --- these block the SERVER'S IP (a Google Cloud datacenter address) - no browser setting gets past that.
+  #     Each needs a residential proxy (`proxy:` below; only that site uses it, ~$3-8/GB, ~$0.01-0.04/product)
+  #     or the site's official API. Off until then.
+  - name: etsy-vintage-jackets     # DataDome: "Automated (bot) activity on your network (IP ...)". Etsy also has
+    site: https://www.etsy.com     #   an official API (Open API v3, free key) - the better route for Etsy.
+    category: vintage jacket
+    per_day: 10
+    enabled: false
+    # proxy: ${RESIDENTIAL_PROXY}
+
+  - name: mercari-jackets          # Cloudflare: 403 Forbidden (US marketplace, USD prices)
+    site: https://www.mercari.com
+    category: jacket
+    per_day: 10
+    enabled: false
+    # proxy: ${RESIDENTIAL_PROXY}
+
+  - name: thredup-jackets          # Cloudflare: 403 for HTTP and browser
+    site: https://www.thredup.com
+    category: jacket
+    per_day: 10
+    enabled: false
+    # proxy: ${RESIDENTIAL_PROXY}
+
+  - name: wallapop-chaquetas       # 403 for HTTP and browser
+    site: https://es.wallapop.com
+    category: chaqueta
+    per_day: 10
+    enabled: false
+    # proxy: ${RESIDENTIAL_PROXY}
 
   # --- not scrapable this way ---
   - name: tise-jakker              # app-style site: product links are not in the page

@@ -48,7 +48,13 @@ def looks_blocked(status: int, text: str) -> str | None:
     return None
 
 
-def pick_proxy(proxies: list[str], domain: str) -> str | None:
+def pick_proxy(proxies: list[str], domain: str, per_site: dict | None = None) -> str | None:
+    """A site's own proxy (`site_proxies`, e.g. a residential proxy for the sites that block datacenter IPs),
+    else one of the shared `proxies`, sticky per domain, else none (the server's own IP)."""
+    for dom, p in (per_site or {}).items():
+        dom = dom.lower().removeprefix("www.")
+        if p and (domain == dom or domain.endswith("." + dom)):
+            return p
     if not proxies:
         return None
     return proxies[int(hashlib.md5(domain.encode()).hexdigest(), 16) % len(proxies)]   # sticky per domain
@@ -57,6 +63,7 @@ def pick_proxy(proxies: list[str], domain: str) -> str | None:
 class Http:
     def __init__(self, cfg):
         self.proxies = [p for p in (cfg.get("proxies") or []) if p]
+        self.site_proxies = cfg.get("site_proxies") or {}
         self.sessions: dict[str, creq.Session] = {}
         self.impersonate = cfg.get("http", {}).get("impersonate", "chrome")
 
@@ -64,7 +71,7 @@ class Http:
         if domain not in self.sessions:
             s = creq.Session(impersonate=self.impersonate, timeout=30)
             s.headers.update({"Accept-Language": "en-US,en;q=0.9"})
-            p = pick_proxy(self.proxies, domain)
+            p = pick_proxy(self.proxies, domain, self.site_proxies)
             if p:
                 s.proxies = {"http": p, "https": p}
             self.sessions[domain] = s
@@ -90,6 +97,7 @@ class Browser:
             self.mode = "xvfb" if sys.platform.startswith("linux") else "visible"
         self.restart_every = int(b.get("restart_every", 40))
         self.proxies = [p for p in (cfg.get("proxies") or []) if p]
+        self.site_proxies = cfg.get("site_proxies") or {}
         self.profiles_dir = profiles_dir
         self.driver, self.domain, self.pages = None, None, 0
         self.display = None
@@ -135,7 +143,7 @@ class Browser:
             self.close()
         if not self.driver:
             from seleniumbase import Driver
-            proxy = pick_proxy(self.proxies, domain)
+            proxy = pick_proxy(self.proxies, domain, self.site_proxies)
             kw = dict(uc=True, locale_code="en",
                       user_data_dir=os.path.join(self.profiles_dir, re.sub(r"[^a-z0-9.-]", "_", domain)))
             if proxy:

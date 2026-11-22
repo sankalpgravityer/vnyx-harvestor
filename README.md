@@ -122,6 +122,28 @@ after another, so every site sees exactly the same polite pace as before. A run 
 slowest site instead of the sum of all of them. Each browser site needs ~500 MB RAM (the systemd unit allows
 4 GB). Log lines carry the thread name (`site_0`, `site_1` ...). `parallel_sites: 1` = one site after another.
 
+## Per-site settings
+
+A job can carry settings for its own site only:
+
+```yaml
+  - name: grailed-jackets
+    site: https://www.grailed.com
+    politeness: {min_delay: 40, max_delay: 90, long_pause_every: 8, max_requests_per_domain_per_day: 40}
+  - name: etsy-vintage-jackets
+    site: https://www.etsy.com
+    proxy: ${RESIDENTIAL_PROXY}       # only Etsy goes through it; every other site keeps the server's own IP
+```
+
+Why some sites still refuse a real Chrome in a virtual display: bot protection checks the **IP's owner first**
+(a cloud/datacenter address is treated as a bot before the browser is looked at), then **behaviour** (too many
+pages too fast), and only then the **browser fingerprint** - the one thing the virtual display solves. A site
+that blocks the server's IP (Etsy, Mercari, thredUP, Wallapop on 22 Nov 2026) needs a residential proxy or its
+official API; a site that blocks after many requests (Grailed) needs a slower `politeness:`.
+
+When a search page renders its products without links (Vestiaire), the product URLs are read from the page's own
+data instead.
+
 ## How it avoids getting your IP blocked
 
 | Measure | What it does |
