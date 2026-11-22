@@ -49,77 +49,155 @@ ebay:                           # free keys: https://developer.ebay.com/my/keys
   marketplace: EBAY_US
 
 jobs:
+  # ~280 products/day (22 Nov 2026), ~200-250 of them created in Stock (unbranded / unknown brands are skipped).
+  # Each run (5/day) takes per_day/5 of every job. Several categories per site so the search pages keep giving
+  # new products day after day (one keyword's first pages run dry on relevance-sorted sites).
   # type: auto (default) -> eBay API if keys are set, Shopify JSON if the store is Shopify, else generic
   # fetch (generic only): auto (HTTP first, browser if data incomplete) | http | browser
-  # Tested 22 Nov 2026 (one search + one product page each). "Mac" = tested from a home connection with
-  # headless Chrome; the server runs real Chrome in a virtual display, so re-check with `harvester.py check --browser`.
 
-  # --- working from the server (22 Nov) ---
-  - name: pangaia-track-pants      # Shopify feed, no browser
-    site: https://pangaia.com
-    category: track pants
-    per_day: 30
-
+  # --- Vinted (EU resale, brand + price + photos; no blocks so far): 60/day ---
   - name: vinted-jackets
     site: https://www.vinted.nl
     category: jacket
-    per_day: 40
+    per_day: 20
 
-  - name: grailed-jackets          # bot check after ~30 requests at the default pace (22 Nov) -> slower here
-    site: https://www.grailed.com
-    category: jacket
+  - name: vinted-jeans
+    site: https://www.vinted.nl
+    category: jeans
     per_day: 15
-    fetch: browser
-    politeness: {min_delay: 40, max_delay: 90, long_pause_every: 8, max_requests_per_domain_per_day: 40}
 
-  # --- working from the Mac (22 Nov) ---
-  - name: poshmark-jackets         # brand, price, up to 30 photos
-    site: https://poshmark.com
-    category: jacket
+  - name: vinted-sweaters
+    site: https://www.vinted.nl
+    category: sweater
+    per_day: 15
+
+  - name: vinted-dresses
+    site: https://www.vinted.nl
+    category: dress
     per_day: 10
 
-  - name: sellpy-jassen            # brand, price, up to 30 photos
+  # --- Sellpy (EU resale, brand + up to 30 photos): 30/day ---
+  - name: sellpy-jassen
     site: https://www.sellpy.nl
     category: jas
     per_day: 10
 
-  - name: marktplaats-jassen       # works, but listings carry no brand -> Stock refuses them (no brand)
-    site: https://www.marktplaats.nl
-    category: jas
+  - name: sellpy-jeans
+    site: https://www.sellpy.nl
+    category: jeans
     per_day: 10
 
-  - name: 2dehands-jassen          # same as Marktplaats (no brand on the listing)
-    site: https://www.2dehands.be
-    category: jas
+  - name: sellpy-truien
+    site: https://www.sellpy.nl
+    category: trui
     per_day: 10
 
-  - name: subito-giacche           # works; no brand field on the listing
-    site: https://www.subito.it
-    category: giacca
-    per_day: 10
+  # --- Pangaia (Shopify feed, one request = 250 products; whole catalogue, not one keyword): 30/day ---
+  - name: pangaia-all
+    site: https://pangaia.com
+    category: ""                   # empty = every product in the store's feed
+    per_day: 30
 
-  # --- server check 22 Nov: OK with the virtual-display browser ---
-  - name: depop-jackets            # Mac: HTTP 403
-    site: https://www.depop.com
-    category: jacket
-    per_day: 10
-
-
-  - name: kleinanzeigen-jacken     # Mac: HTTP 403
-    site: https://www.kleinanzeigen.de
-    category: jacke
-    per_day: 10
-
-  - name: vestiaire-jackets        # product links read from the page data (tiles are not links)
+  # --- Vestiaire Collective (luxury resale; links read from the page data): 25/day ---
+  - name: vestiaire-jackets
     site: https://www.vestiairecollective.com
     category: jacket
     per_day: 10
 
+  - name: vestiaire-coats
+    site: https://www.vestiairecollective.com
+    category: coat
+    per_day: 8
 
-  - name: zalando-jassen           # Mac: blank page (Akamai). Mostly NEW items (retail prices)
+  - name: vestiaire-knitwear
+    site: https://www.vestiairecollective.com
+    category: sweater
+    per_day: 7
+
+  # --- Poshmark (US resale, USD, brand + many photos): 25/day ---
+  - name: poshmark-jackets
+    site: https://poshmark.com
+    category: jacket
+    per_day: 10
+
+  - name: poshmark-jeans
+    site: https://poshmark.com
+    category: jeans
+    per_day: 8
+
+  - name: poshmark-sweaters
+    site: https://poshmark.com
+    category: sweater
+    per_day: 7
+
+  # --- Depop (resale; plain requests get 403, the browser gets through): 20/day ---
+  - name: depop-jackets
+    site: https://www.depop.com
+    category: jacket
+    per_day: 10
+
+  - name: depop-jeans
+    site: https://www.depop.com
+    category: jeans
+    per_day: 10
+
+  # --- Zalando (NEW items -> retail prices, a reference for Stock): 20/day ---
+  - name: zalando-jassen
     site: https://www.zalando.nl
     category: jas
+    per_day: 10
     search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
+
+  - name: zalando-jeans
+    site: https://www.zalando.nl
+    category: jeans
+    per_day: 10
+    search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
+
+  # --- Kleinanzeigen (DE classifieds; brand often only in the title): 20/day ---
+  - name: kleinanzeigen-jacken
+    site: https://www.kleinanzeigen.de
+    category: jacke
+    per_day: 10
+
+  - name: kleinanzeigen-jeans
+    site: https://www.kleinanzeigen.de
+    category: jeans
+    per_day: 10
+
+  # --- Grailed (bot check after ~30 requests at the default pace -> slow, both jobs share this pace): 15/day ---
+  - name: grailed-jackets
+    site: https://www.grailed.com
+    category: jacket
+    per_day: 8
+    fetch: browser
+    politeness: {min_delay: 40, max_delay: 90, long_pause_every: 8, max_requests_per_domain_per_day: 40}
+
+  - name: grailed-denim
+    site: https://www.grailed.com
+    category: denim
+    per_day: 7
+    fetch: browser
+
+  # --- classifieds without a brand field: only listings whose title names a Brand Master brand reach Stock ---
+  - name: marktplaats-jassen
+    site: https://www.marktplaats.nl
+    category: jas
+    per_day: 8
+
+  - name: marktplaats-spijkerbroeken
+    site: https://www.marktplaats.nl
+    category: spijkerbroek
+    per_day: 7
+
+  - name: 2dehands-jassen
+    site: https://www.2dehands.be
+    category: jas
+    per_day: 10
+
+  - name: subito-giacche
+    site: https://www.subito.it
+    category: giacca
     per_day: 10
 
   # --- these block the SERVER'S IP (a Google Cloud datacenter address) - no browser setting gets past that.
