@@ -24,7 +24,7 @@ python3 -m venv .venv
 echo "==> config"
 [ -f config.yaml ] || cp config.example.yaml config.yaml
 if [ ! -f /etc/harvester.env ]; then
-  printf 'EBAY_CLIENT_ID=\nEBAY_CLIENT_SECRET=\n' | sudo tee /etc/harvester.env >/dev/null
+  printf 'STOCK_API_URL=https://api-stock.vnyx.ai\nSTOCK_API_KEY=\nEBAY_CLIENT_ID=\nEBAY_CLIENT_SECRET=\n' | sudo tee /etc/harvester.env >/dev/null
   sudo chown "$RUN_USER" /etc/harvester.env && sudo chmod 600 /etc/harvester.env
 fi
 mkdir -p data && chown -R "$RUN_USER" data .venv 2>/dev/null || true
@@ -38,9 +38,10 @@ cat <<MSG
 
 Installed. Next steps:
   1. edit   $APP_DIR/config.yaml        (your sites, categories, per_day)
-            /etc/harvester.env          (eBay API keys, optional)
+            /etc/harvester.env          (STOCK_API_KEY; eBay API keys, optional)
   2. test   cd $APP_DIR && .venv/bin/python harvester.py check --browser
             .venv/bin/python harvester.py run --max 2
+            .venv/bin/python harvester.py push --dry-run
   3. start  sudo systemctl enable --now harvester.timer
   4. watch  systemctl list-timers harvester.timer ; tail -f data/logs/harvester.log
 MSG

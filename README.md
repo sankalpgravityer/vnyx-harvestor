@@ -10,11 +10,12 @@ site that pushes back, and tells you up front which sites block your server no m
 
 ```
 harvester/
-├── harvester.py            # CLI: check | run | export | status
+├── harvester.py            # CLI: check | run | export | status | push
 ├── config.example.yaml     # copy to config.yaml
 ├── install.sh              # one-time Ubuntu setup (Chrome, Xvfb, venv, systemd timer)
 ├── setup_mac.sh            # local test setup on macOS - see MAC_SETUP.md
 ├── config.local.example.yaml  # fast local-test config
+├── tests/                  # pytest: the Stock push
 ├── deploy/                 # harvester.service + harvester.timer (5 runs/day, randomised)
 └── hv/
     ├── guard.py            # rate limits, robots.txt, daily caps, circuit breaker  <- IP protection
@@ -23,7 +24,8 @@ harvester/
     ├── db.py               # SQLite: queue, products, per-site state, block events
     ├── product_scraper.py  # product page extraction (also usable standalone)
     ├── category_scraper.py # search-result discovery (also usable standalone)
-    └── ebay_api.py         # official eBay Browse API client
+    ├── ebay_api.py         # official eBay Browse API client
+    └── stock_push.py       # harvested products -> Stock API Product Master (POST /products/bulk)
 ```
 
 ## Test locally on a Mac first
@@ -67,6 +69,38 @@ Output (no images or HTML pages are ever saved):
   "job": "flipkart-jeans", "source": "http", "scraped_at": "2026-11-22T10:38:29+00:00"
 }
 ```
+
+## Into the Stock DB (Product Master)
+
+Every run ends by sending the day's new products to the **Stock API** through its bulk upload
+(`POST /products/bulk`, see `hv/stock_push.py`). No direct database access; nothing to change on Stock's side.
+
+```bash
+# /etc/harvester.env (systemd) - or export them for a manual run
+STOCK_API_URL=https://api-stock.vnyx.ai
+STOCK_API_KEY=...                       # one of Stock's PRICING_API_KEYS
+
+.venv/bin/python harvester.py push --dry-run      # Stock validates and matches, writes nothing
+.venv/bin/python harvester.py push                # send what has not been sent yet
+.venv/bin/python harvester.py push --retry-failed # resend rows Stock refused (e.g. after adding a brand)
+.venv/bin/python harvester.py status              # ... "Stock API: created N, updated N, refused N"
+```
+
+| Harvested | Stock |
+|---|---|
+| site + item id (else URL) | `externalId` - a product scraped again updates its row |
+| brand, title, description, category, colour, size | the same fields (size -> `sizeOnLabel`) |
+| image URLs | `images` (up to 20, never downloaded) |
+| price | resale sites (Vinted, Grailed, eBay used ...) -> `RESALE_ASKING`; shops -> `RETAIL_CURRENT`; struck-through price -> `RETAIL_ORIGINAL` |
+| Shopify variants | `variants` (size, price, in stock) |
+| condition, seller, rating, job | `attributes` (`harvester_*`) |
+
+Each site is its own Stock source, `upload:harvester-<site>`. **A product whose brand is not in Stock's Brand
+Master is refused** (`BRAND_NOT_FOUND`), logged, and not sent again until `--retry-failed`. What reached Stock (PRD
+code or the reason it did not) is kept in `data/harvester.db`, table `stock_push`. `stock.auto_push: false` in
+`config.yaml` turns the end-of-run push off.
+
+Tests: `.venv/bin/pip install pytest && .venv/bin/python -m pytest -q tests`
 
 ## How it avoids getting your IP blocked
 

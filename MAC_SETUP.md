@@ -150,3 +150,10 @@ If it says "no products found on search page", add the site's search URL:
 
 Same code, different config. Copy the folder to the server and follow the README's **Deploy** section
 (`bash install.sh` → `config.yaml` → `harvester.py check --browser` → enable the timer).
+
+
+## Apple Silicon (M1/M2/M3)
+
+SeleniumBase's stealth driver (UC mode) ships an Intel build: on an Apple-Silicon Mac it needs Rosetta 2
+(`softwareupdate --install-rosetta`). The Ubuntu server (amd64) is not affected. Shopify feeds and the eBay API
+never start a browser.

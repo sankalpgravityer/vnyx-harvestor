@@ -6,7 +6,9 @@ Product harvester - headless, scheduled, polite multi-site product scraper for a
   python harvester.py run              # scrape today's share of every job (run by the systemd timer)
   python harvester.py run --job vinted-jackets --max 5
   python harvester.py export           # today's products -> data/exports/<day>/products.csv/.json
-  python harvester.py status           # quotas, cooldowns, block events
+  python harvester.py status           # quotas, cooldowns, block events, what reached Stock
+  python harvester.py push --dry-run   # send products to the Stock API (bulk upload) - dry run: validate only
+  python harvester.py push             # send products not sent yet (also runs after every `run`)
 
 Configuration: config.yaml (see config.example.yaml).
 """
@@ -30,6 +32,7 @@ from logging.handlers import RotatingFileHandler
 import yaml
 
 from hv import product_scraper as ps
+from hv import stock_push
 from hv.adapters import Generic, Shopify, make_adapter
 from hv.db import DB, today
 from hv.guard import DomainBlocked, Guard, domain_of
@@ -210,6 +213,9 @@ def cmd_run(ctx, a):
     log.info("run finished: %d products in %.1f min (today total %d)", total, (time.time() - t0) / 60,
              ctx.db.count_today())
     cmd_export(ctx, argparse.Namespace(day=today(), quiet=True))
+    scfg = stock_push.stock_cfg(ctx.cfg)
+    if scfg["auto_push"] and scfg["api_key"]:
+        cmd_push(ctx, argparse.Namespace(dry_run=False, retry_failed=False, day=None))
 
 
 def cmd_check(ctx, a):
@@ -272,6 +278,25 @@ def cmd_export(ctx, a):
         print(f"{len(rows)} products -> {path} (+ products.csv)")
 
 
+def cmd_push(ctx, a):
+    """Products -> Stock API Product Master (POST /products/bulk). See hv/stock_push.py."""
+    r = stock_push.push(ctx.db, ctx.cfg, dry_run=a.dry_run, retry_failed=a.retry_failed, day=a.day)
+    mode = "DRY RUN (Stock validated, nothing written)" if a.dry_run else "pushed"
+    if a.dry_run:
+        counts = f"would create {r['would_create']}, would update {r['would_update']}"
+    else:
+        counts = f"created {r['created']}, updated {r['updated']}"
+    log.info("stock push %s: %d products, %d sent - %s, refused %d, not sendable %d",
+             mode, r["products"], r["sent"], counts, r["failed"], r["skipped"])
+    for e in r["errors"]:
+        log.warning("stock push: %s", e)
+    for f in r["failures"][:30]:
+        log.info("  not saved: %s - %s%s", f["url"][:90], f["why"], f" (brand {f['brand']})" if f.get("brand") else "")
+    if len(r["failures"]) > 30:
+        log.info("  ... %d more", len(r["failures"]) - 30)
+    return r
+
+
 def cmd_status(ctx, a):
     print(f"\nToday ({today()}): {ctx.db.count_today()} / {ctx.cfg.get('daily_total_limit', 200)} products\n")
     for j in ctx.cfg.get("jobs", []):
@@ -282,6 +307,10 @@ def cmd_status(ctx, a):
         cd = ctx.guard.cooldown_left(d["domain"])
         print(f"  {d['domain']:28} requests today {d['requests_today'] if d['day'] == today() else 0:>4}"
               f"  strikes {d['strikes']}  {'COOLDOWN %.1fh (%s)' % (cd / 3600, d['last_block_reason']) if cd else 'ok'}")
+    sp = stock_push.summary(ctx.db)
+    print(f"\nStock API: created {sp.get('created', 0)}, updated {sp.get('updated', 0)}, "
+          f"refused {sp.get('failed', 0)}, not sent yet {sp.get('not_sent_yet', 0)}"
+          f"{'' if stock_push.stock_cfg(ctx.cfg)['api_key'] else '  (STOCK_API_KEY not set)'}")
     ev = ctx.db.x("SELECT * FROM events ORDER BY ts DESC LIMIT 10").fetchall()
     if ev:
         print("\nRecent block events:")
@@ -292,18 +321,21 @@ def cmd_status(ctx, a):
 
 def main():
     ap = argparse.ArgumentParser(description="Polite headless multi-site product harvester")
-    ap.add_argument("command", choices=["run", "check", "export", "status"])
+    ap.add_argument("command", choices=["run", "check", "export", "status", "push"])
     ap.add_argument("--config", "-c", default=os.path.join(ROOT, "config.yaml"))
     ap.add_argument("--job", help="only this job")
     ap.add_argument("--max", type=int, help="at most N products per job in this run")
     ap.add_argument("--day", help="export: YYYY-MM-DD or 'all' (default today)")
     ap.add_argument("--browser", action="store_true", help="check: also test the stealth browser per site")
+    ap.add_argument("--dry-run", action="store_true", help="push: Stock validates and matches, writes nothing")
+    ap.add_argument("--retry-failed", action="store_true", help="push: also resend rows Stock refused before")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
     cfg = load_config(a.config)
     setup_logging(cfg, a.verbose)
     ctx = Ctx(cfg)
-    {"run": cmd_run, "check": cmd_check, "export": cmd_export, "status": cmd_status}[a.command](ctx, a)
+    {"run": cmd_run, "check": cmd_check, "export": cmd_export, "status": cmd_status,
+     "push": cmd_push}[a.command](ctx, a)
 
 
 if __name__ == "__main__":

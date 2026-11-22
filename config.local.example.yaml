@@ -22,6 +22,12 @@ browser:
 
 proxies: []
 
+stock:                          # where products go: the Stock API's Product Master (POST /products/bulk)
+  url: ${STOCK_API_URL}         # empty = https://api-stock.vnyx.ai
+  api_key: ${STOCK_API_KEY}     # one of Stock's PRICING_API_KEYS; without it nothing is sent
+  auto_push: true               # push after every run (or by hand: harvester.py push)
+  batch: 200                    # rows per call (Stock allows 500)
+
 ebay:
   client_id: ${EBAY_CLIENT_ID}
   client_secret: ${EBAY_CLIENT_SECRET}
