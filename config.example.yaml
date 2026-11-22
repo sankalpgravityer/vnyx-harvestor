@@ -1,9 +1,9 @@
 # Product harvester configuration. Copy to config.yaml and edit.
 # ${VAR} values are read from the environment (/etc/harvester.env when run by systemd).
 
-daily_total_limit: 300          # hard cap across all jobs per day
+daily_total_limit: 2400         # hard cap across all jobs per day (~200 per site x 11 sites + Grailed 60)
 
-parallel_sites: 3               # sites scraped at the same time, one thread (and one Chrome) each. Each site
+parallel_sites: 4               # sites scraped at the same time, one thread (and one Chrome) each. Each site
                                 # still gets the same polite pace - this shortens a run, it does not add load
                                 # on any site. ~500 MB RAM per browser site. 1 = one site after another.
 
@@ -18,7 +18,7 @@ politeness:                     # <- this section is what keeps your IP clean
   max_delay: 35
   long_pause_every: 15          # after ~15 requests to a site, take a longer break...
   long_pause_seconds: [60, 180] # ...of 1-3 minutes
-  max_requests_per_domain_per_day: 150
+  max_requests_per_domain_per_day: 300   # 200 products/site/day need ~230 requests
   respect_robots: true
   cooldown_hours: [6, 24, 72]   # first block signal -> 6h pause for that site, then 24h, then 72h
 
@@ -49,156 +49,298 @@ ebay:                           # free keys: https://developer.ebay.com/my/keys
   marketplace: EBAY_US
 
 jobs:
-  # ~280 products/day (22 Nov 2026), ~200-250 of them created in Stock (unbranded / unknown brands are skipped).
-  # Each run (5/day) takes per_day/5 of every job. Several categories per site so the search pages keep giving
-  # new products day after day (one keyword's first pages run dry on relevance-sorted sites).
+  # 200 products per site per day (user's target, 22 Nov 2026): 5 categories x 40 per site, Grailed 60 (it raises
+  # a bot check fast). Each run (5/day) takes per_day/5 of every job -> 8 per category, 40 per site per run.
+  # Created in Stock is lower: unbranded listings and brands missing from the Brand Master are skipped.
   # type: auto (default) -> eBay API if keys are set, Shopify JSON if the store is Shopify, else generic
   # fetch (generic only): auto (HTTP first, browser if data incomplete) | http | browser
 
-  # --- Vinted (EU resale, brand + price + photos; no blocks so far): 60/day ---
-  - name: vinted-jackets
+  # --- vinted: 200/day - EU resale, brand + price + photos ---
+  - name: vinted-jacket
     site: https://www.vinted.nl
     category: jacket
-    per_day: 20
+    per_day: 40
 
   - name: vinted-jeans
     site: https://www.vinted.nl
     category: jeans
-    per_day: 15
+    per_day: 40
 
-  - name: vinted-sweaters
+  - name: vinted-sweater
     site: https://www.vinted.nl
     category: sweater
-    per_day: 15
+    per_day: 40
 
-  - name: vinted-dresses
+  - name: vinted-dress
     site: https://www.vinted.nl
     category: dress
-    per_day: 10
+    per_day: 40
 
-  # --- Sellpy (EU resale, brand + up to 30 photos): 30/day ---
-  - name: sellpy-jassen
+  - name: vinted-shirt
+    site: https://www.vinted.nl
+    category: shirt
+    per_day: 40
+
+  # --- sellpy: 200/day - EU resale, brand + up to 30 photos ---
+  - name: sellpy-jas
     site: https://www.sellpy.nl
     category: jas
-    per_day: 10
+    per_day: 40
 
   - name: sellpy-jeans
     site: https://www.sellpy.nl
     category: jeans
-    per_day: 10
+    per_day: 40
 
-  - name: sellpy-truien
+  - name: sellpy-trui
     site: https://www.sellpy.nl
     category: trui
-    per_day: 10
+    per_day: 40
 
-  # --- Pangaia (Shopify feed, one request = 250 products; whole catalogue, not one keyword): 30/day ---
-  - name: pangaia-all
-    site: https://pangaia.com
-    category: ""                   # empty = every product in the store's feed
-    per_day: 30
+  - name: sellpy-jurk
+    site: https://www.sellpy.nl
+    category: jurk
+    per_day: 40
 
-  # --- Vestiaire Collective (luxury resale; links read from the page data): 25/day ---
-  - name: vestiaire-jackets
+  - name: sellpy-overhemd
+    site: https://www.sellpy.nl
+    category: overhemd
+    per_day: 40
+
+  # --- vestiaire: 200/day - luxury resale; links read from the page data ---
+  - name: vestiaire-jacket
     site: https://www.vestiairecollective.com
     category: jacket
-    per_day: 10
+    per_day: 40
 
-  - name: vestiaire-coats
+  - name: vestiaire-coat
     site: https://www.vestiairecollective.com
     category: coat
-    per_day: 8
+    per_day: 40
 
-  - name: vestiaire-knitwear
+  - name: vestiaire-sweater
     site: https://www.vestiairecollective.com
     category: sweater
-    per_day: 7
+    per_day: 40
 
-  # --- Poshmark (US resale, USD, brand + many photos): 25/day ---
-  - name: poshmark-jackets
+  - name: vestiaire-dress
+    site: https://www.vestiairecollective.com
+    category: dress
+    per_day: 40
+
+  - name: vestiaire-jeans
+    site: https://www.vestiairecollective.com
+    category: jeans
+    per_day: 40
+
+  # --- poshmark: 200/day - US resale, USD ---
+  - name: poshmark-jacket
     site: https://poshmark.com
     category: jacket
-    per_day: 10
+    per_day: 40
 
   - name: poshmark-jeans
     site: https://poshmark.com
     category: jeans
-    per_day: 8
+    per_day: 40
 
-  - name: poshmark-sweaters
+  - name: poshmark-sweater
     site: https://poshmark.com
     category: sweater
-    per_day: 7
+    per_day: 40
 
-  # --- Depop (resale; plain requests get 403, the browser gets through): 20/day ---
-  - name: depop-jackets
+  - name: poshmark-dress
+    site: https://poshmark.com
+    category: dress
+    per_day: 40
+
+  - name: poshmark-shirt
+    site: https://poshmark.com
+    category: shirt
+    per_day: 40
+
+  # --- depop: 200/day - resale; the browser gets through, plain requests 403 ---
+  - name: depop-jacket
     site: https://www.depop.com
     category: jacket
-    per_day: 10
+    per_day: 40
 
   - name: depop-jeans
     site: https://www.depop.com
     category: jeans
-    per_day: 10
+    per_day: 40
 
-  # --- Zalando (NEW items -> retail prices, a reference for Stock): 20/day ---
-  - name: zalando-jassen
+  - name: depop-sweater
+    site: https://www.depop.com
+    category: sweater
+    per_day: 40
+
+  - name: depop-dress
+    site: https://www.depop.com
+    category: dress
+    per_day: 40
+
+  - name: depop-shirt
+    site: https://www.depop.com
+    category: shirt
+    per_day: 40
+
+  # --- zalando: 200/day - NEW items -> retail prices (a reference for Stock) ---
+  - name: zalando-jas
     site: https://www.zalando.nl
     category: jas
-    per_day: 10
+    per_day: 40
     search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
 
   - name: zalando-jeans
     site: https://www.zalando.nl
     category: jeans
-    per_day: 10
+    per_day: 40
     search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
 
-  # --- Kleinanzeigen (DE classifieds; brand often only in the title): 20/day ---
-  - name: kleinanzeigen-jacken
+  - name: zalando-trui
+    site: https://www.zalando.nl
+    category: trui
+    per_day: 40
+    search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
+
+  - name: zalando-jurk
+    site: https://www.zalando.nl
+    category: jurk
+    per_day: 40
+    search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
+
+  - name: zalando-overhemd
+    site: https://www.zalando.nl
+    category: overhemd
+    per_day: 40
+    search_url: "https://www.zalando.nl/catalogus/?q={query}&p={page}"
+
+  # --- kleinanzeigen: 200/day - DE classifieds; brand often only in the title ---
+  - name: kleinanzeigen-jacke
     site: https://www.kleinanzeigen.de
     category: jacke
-    per_day: 10
+    per_day: 40
 
   - name: kleinanzeigen-jeans
     site: https://www.kleinanzeigen.de
     category: jeans
-    per_day: 10
+    per_day: 40
 
-  # --- Grailed (bot check after ~30 requests at the default pace -> slow, both jobs share this pace): 15/day ---
+  - name: kleinanzeigen-pullover
+    site: https://www.kleinanzeigen.de
+    category: pullover
+    per_day: 40
+
+  - name: kleinanzeigen-kleid
+    site: https://www.kleinanzeigen.de
+    category: kleid
+    per_day: 40
+
+  - name: kleinanzeigen-hemd
+    site: https://www.kleinanzeigen.de
+    category: hemd
+    per_day: 40
+
+  # --- marktplaats: 200/day - no brand field: only titles naming a Brand Master brand reach Stock ---
+  - name: marktplaats-jas
+    site: https://www.marktplaats.nl
+    category: jas
+    per_day: 40
+
+  - name: marktplaats-spijkerbroek
+    site: https://www.marktplaats.nl
+    category: spijkerbroek
+    per_day: 40
+
+  - name: marktplaats-trui
+    site: https://www.marktplaats.nl
+    category: trui
+    per_day: 40
+
+  - name: marktplaats-jurk
+    site: https://www.marktplaats.nl
+    category: jurk
+    per_day: 40
+
+  - name: marktplaats-overhemd
+    site: https://www.marktplaats.nl
+    category: overhemd
+    per_day: 40
+
+  # --- 2dehands: 200/day - no brand field (as Marktplaats) ---
+  - name: 2dehands-jas
+    site: https://www.2dehands.be
+    category: jas
+    per_day: 40
+
+  - name: 2dehands-jeans
+    site: https://www.2dehands.be
+    category: jeans
+    per_day: 40
+
+  - name: 2dehands-trui
+    site: https://www.2dehands.be
+    category: trui
+    per_day: 40
+
+  - name: 2dehands-kleed
+    site: https://www.2dehands.be
+    category: kleed
+    per_day: 40
+
+  - name: 2dehands-hemd
+    site: https://www.2dehands.be
+    category: hemd
+    per_day: 40
+
+  # --- subito: 200/day - no brand field (as Marktplaats) ---
+  - name: subito-giacca
+    site: https://www.subito.it
+    category: giacca
+    per_day: 40
+
+  - name: subito-jeans
+    site: https://www.subito.it
+    category: jeans
+    per_day: 40
+
+  - name: subito-maglione
+    site: https://www.subito.it
+    category: maglione
+    per_day: 40
+
+  - name: subito-vestito
+    site: https://www.subito.it
+    category: vestito
+    per_day: 40
+
+  - name: subito-camicia
+    site: https://www.subito.it
+    category: camicia
+    per_day: 40
+
+  # --- pangaia: 200/day - Shopify feed (one request = 250 products), whole catalogue. NOTE: the store has a few
+  #     hundred products in all, so after ~2-3 days this job only picks up what is new in the store. ---
+  - name: pangaia-all
+    site: https://pangaia.com
+    category: ""
+    per_day: 200
+
+  # --- grailed: 60/day, slow - a bot check came after ~30 requests at the normal pace (22 Nov). 200/day here would
+  #     get the server's IP blocked for days. Raise only if a week at 60 shows no COOLDOWN in `status`. ---
   - name: grailed-jackets
     site: https://www.grailed.com
     category: jacket
-    per_day: 8
+    per_day: 30
     fetch: browser
-    politeness: {min_delay: 40, max_delay: 90, long_pause_every: 8, max_requests_per_domain_per_day: 40}
+    politeness: {min_delay: 40, max_delay: 90, long_pause_every: 8, max_requests_per_domain_per_day: 90}
 
   - name: grailed-denim
     site: https://www.grailed.com
     category: denim
-    per_day: 7
+    per_day: 30
     fetch: browser
-
-  # --- classifieds without a brand field: only listings whose title names a Brand Master brand reach Stock ---
-  - name: marktplaats-jassen
-    site: https://www.marktplaats.nl
-    category: jas
-    per_day: 8
-
-  - name: marktplaats-spijkerbroeken
-    site: https://www.marktplaats.nl
-    category: spijkerbroek
-    per_day: 7
-
-  - name: 2dehands-jassen
-    site: https://www.2dehands.be
-    category: jas
-    per_day: 10
-
-  - name: subito-giacche
-    site: https://www.subito.it
-    category: giacca
-    per_day: 10
 
   # --- these block the SERVER'S IP (a Google Cloud datacenter address) - no browser setting gets past that.
   #     Each needs a residential proxy (`proxy:` below; only that site uses it, ~$3-8/GB, ~$0.01-0.04/product)
