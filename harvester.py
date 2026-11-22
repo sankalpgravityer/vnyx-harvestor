@@ -10,6 +10,8 @@ Product harvester - headless, scheduled, polite multi-site product scraper for a
   python harvester.py status           # quotas, cooldowns, block events, what reached Stock
   python harvester.py push --dry-run   # send products to the Stock API (bulk upload) - dry run: validate only
   python harvester.py push             # send products not sent yet (also runs after every `run`)
+  python harvester.py rescrape --job sellpy-jassen   # read already-harvested products again (next run),
+                                       # then the push updates their Stock rows (default: every browser job)
 
 Configuration: config.yaml (see config.example.yaml).
 """
@@ -361,6 +363,24 @@ def cmd_push(ctx, a):
     return r
 
 
+def cmd_rescrape(ctx, a):
+    """Put already-harvested products back in the queue so the next run reads them again (fixed extraction),
+    and the push after it updates the same Stock rows - matched on externalId, images replaced. Default: the
+    products of every browser/HTTP job (Shopify and eBay API records are complete and are left alone)."""
+    jobs = [j for j in ctx.cfg.get("jobs", []) if (not a.job or j["name"] == a.job)]
+    names = {j["name"] for j in jobs if a.job or j.get("type", "auto") not in ("shopify", "ebay_api")}
+    rows = [r for r in ctx.db.products() if r["job"] in names and r.get("source") not in ("shopify", "ebay_api")]
+    for r in rows:
+        ctx.db.x("INSERT OR REPLACE INTO queue(url, job, site, listing, status, attempts, discovered_at, updated_at) "
+                 "VALUES (?,?,?,?,'pending',0,?,?)", (r["url"], r["job"], r["site"], "{}", r["scraped_at"], r["scraped_at"]))
+        ctx.db.x("DELETE FROM products WHERE url=?", (r["url"],))
+    by_job: dict = {}
+    for r in rows:
+        by_job[r["job"]] = by_job.get(r["job"], 0) + 1
+    log.info("rescrape: %d products queued again %s - the next run reads them first; use run --max N "
+             "(or --job) to take them", len(rows), json.dumps(by_job))
+
+
 def cmd_status(ctx, a):
     print(f"\nToday ({today()}): {ctx.db.count_today()} / {ctx.cfg.get('daily_total_limit', 200)} products\n")
     for j in ctx.cfg.get("jobs", []):
@@ -385,7 +405,7 @@ def cmd_status(ctx, a):
 
 def main():
     ap = argparse.ArgumentParser(description="Polite headless multi-site product harvester")
-    ap.add_argument("command", choices=["run", "check", "export", "status", "push"])
+    ap.add_argument("command", choices=["run", "check", "export", "status", "push", "rescrape"])
     ap.add_argument("--config", "-c", default=os.path.join(ROOT, "config.yaml"))
     ap.add_argument("--job", help="only this job")
     ap.add_argument("--max", type=int, help="at most N products per job in this run")
@@ -400,7 +420,7 @@ def main():
     setup_logging(cfg, a.verbose)
     ctx = Ctx(cfg)
     {"run": cmd_run, "check": cmd_check, "export": cmd_export, "status": cmd_status,
-     "push": cmd_push}[a.command](ctx, a)
+     "push": cmd_push, "rescrape": cmd_rescrape}[a.command](ctx, a)
 
 
 if __name__ == "__main__":

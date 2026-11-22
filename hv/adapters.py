@@ -10,6 +10,7 @@ from __future__ import annotations
 import html as _html
 import json
 import logging
+import os
 import re
 import time
 from urllib.parse import urljoin, urlparse
@@ -198,12 +199,27 @@ class Generic(Base):
             if ps.is_blocked(drv):
                 self.ctx.guard.after_block(self.domain, "bot-check on search page")
                 raise DomainBlocked("bot-check on search page")
-            log.warning("[%s] no products found on search page (check selectors / search_url)", self.job["name"])
+            shot = self._debug_snapshot(drv, "no-products")
+            log.warning("[%s] no products found on search page (check selectors / search_url) - "
+                        "what the browser saw: %s", self.job["name"], shot or "no snapshot")
             return []
         self.ctx.guard.after_ok(self.domain)
         added = sum(self.ctx.db.enqueue(r["url"], self.job["name"], r["site"], r) for r in rows)
         log.info("[%s] discovered %d new product URLs (%d listed)", self.job["name"], added, len(rows))
         return []
+
+    def _debug_snapshot(self, drv, why: str) -> str | None:
+        """A screenshot + the HTML of the page the browser is on, in data/debug/, to see what a site served."""
+        try:
+            d = os.path.join(self.ctx.cfg["storage"]["dir"], "debug")
+            os.makedirs(d, exist_ok=True)
+            base = os.path.join(d, f"{self.job['name']}-{why}-{time.strftime('%Y%m%d-%H%M%S')}")
+            drv.save_screenshot(base + ".png")
+            with open(base + ".html", "w", encoding="utf-8") as f:
+                f.write(f"<!-- {drv.current_url} | title: {drv.title} -->\n" + drv.page_source)
+            return base + ".png (+ .html)"
+        except Exception:
+            return None
 
     # --- product page ---
     def scrape(self, qrow):
@@ -251,13 +267,18 @@ class Generic(Base):
         prods, crumbs, _ = ps.parse_jsonld(JSONLD_RE.findall(page))
         if not prods:
             return None
-        r = ps.jsonld_to_record(prods[0])
         meta = {}
         for k, v in META_RE.findall(page):
             meta.setdefault(k.lower(), _html.unescape(v))
+        h1 = re.search(r"<h1[^>]*>(.*?)</h1>", page, re.S | re.I)
+        main = ps.pick_main_product(prods, url, strip_html(h1.group(1)) if h1 else meta.get("og:title", ""))
+        r = ps.jsonld_to_record(main)
         imgs = r.get("images") or []
-        for p in prods[1:]:                                    # ProductGroup variants etc.
-            imgs += ps.jsonld_to_record(p).get("images") or []
+        # Variants of THIS product only (ProductGroup). The other products a page describes are its
+        # recommendations - their photos are not this product's (Sellpy, 22 Nov 2026: 53 other items).
+        for p in prods:
+            if p is not main and ps.same_product(main, p):
+                imgs += ps.jsonld_to_record(p).get("images") or []
         if meta.get("og:image"):
             imgs.append(meta["og:image"])
         price, cur = r.get("price"), r.get("currency")

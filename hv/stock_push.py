@@ -30,6 +30,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -71,6 +72,125 @@ def stock_cfg(cfg: dict) -> dict:
     s["auto_push"] = bool(s.get("auto_push", True))
     s["batch"] = max(1, min(500, int(s.get("batch") or 200)))
     return s
+
+
+# ---------------------------------------------------------------------------
+# The Brand Master: a listing's brand, as Stock knows it (22 Nov 2026)
+# ---------------------------------------------------------------------------
+# Words that are brand names but mostly appear in titles as ordinary words - never taken from a title alone.
+TITLE_STOPWORDS = {"only", "basic", "basics", "vintage", "classic", "original", "new", "sport", "sports", "active",
+                   "blue", "black", "white", "red", "green", "pink", "grey", "gray", "brown", "jeans", "denim",
+                   "jacket", "coat", "jas", "jacke", "giacca", "veste", "shirt", "dress", "shoes", "kids", "men",
+                   "women", "home", "love", "style", "free", "nature", "maat", "size", "taglia", "groesse"}
+
+
+def norm_brand(s: str) -> str:
+    """'Arc'teryx' / 'Arcteryx' / 'ARC TERYX' -> 'arcteryx'; accents dropped."""
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+class BrandIndex:
+    """Stock's Brand Master (names + aliases), read once per push through GET /brands (API key)."""
+
+    def __init__(self, names: dict[str, str]):
+        self.names = names                         # normalized name/alias -> the brand's name in Stock
+
+    def __len__(self):
+        return len(self.names)
+
+    def match(self, brand: str | None) -> str | None:
+        n = norm_brand(brand or "")
+        return self.names.get(n) if n else None
+
+    def in_title(self, title: str | None) -> str | None:
+        """The longest Brand Master name (1-4 words) that appears in the title, or None."""
+        words = re.findall(r"[\w'&.+-]+", title or "", re.U)
+        best = None
+        for size in (4, 3, 2, 1):
+            for i in range(0, max(0, len(words) - size + 1)):
+                phrase = " ".join(words[i:i + size])
+                n = norm_brand(phrase)
+                if len(n) < 3 or (size == 1 and (len(n) < 4 or n in TITLE_STOPWORDS)):
+                    continue
+                hit = self.names.get(n)
+                if hit and (best is None or len(n) > len(norm_brand(best))):
+                    best = hit
+            if best:
+                return best
+        return None
+
+
+def load_brands(scfg: dict, session=None) -> BrandIndex | None:
+    """GET /brands, all pages. None when Stock does not let the key read it (then brands go as scraped)."""
+    http = session or requests
+    names: dict[str, str] = {}
+    skip, take = 0, 100
+    try:
+        while True:
+            r = http.get(f"{scfg['url']}/brands", params={"skip": skip, "take": take}, timeout=60,
+                         headers={"x-api-key": scfg["api_key"], "accept": "application/json"})
+            if r.status_code >= 400:
+                log.warning("stock push: Brand Master not readable with this key (HTTP %s) - brands go as "
+                            "scraped, no title matching", r.status_code)
+                return None
+            data = (r.json() or {}).get("data") or {}
+            items = data.get("items") or []
+            for b in items:
+                name = b.get("name")
+                if not name:
+                    continue
+                for v in [name, b.get("slug")] + [a.get("value") for a in b.get("aliases") or []]:
+                    n = norm_brand(v or "")
+                    if n:
+                        names.setdefault(n, name)
+            skip += len(items)
+            if not items or skip >= int(data.get("total") or 0):
+                break
+    except Exception as e:  # noqa: BLE001
+        log.warning("stock push: could not read the Brand Master (%s) - brands go as scraped", e)
+        return None
+    log.info("stock push: Brand Master loaded - %d names and aliases", len(names))
+    return BrandIndex(names)
+
+
+def resolve_brand(rec: dict, brands: BrandIndex | None) -> tuple[str | None, str]:
+    """-> (brand to send, where it came from: page | page-matched | title | none)."""
+    raw = _text(rec.get("brand"), 120)
+    if brands is None:
+        return raw, "page" if raw else "none"
+    if raw:
+        hit = brands.match(raw)
+        if hit:
+            return hit, "page" if hit == raw else "page-matched"
+        # "Calvin Klein Jeans" -> "Calvin Klein": the page's brand with a known brand inside it
+        inside = brands.in_title(raw)
+        if inside:
+            return inside, "page-matched"
+        return raw, "page"                         # Stock refuses it and says so (BRAND_NOT_FOUND)
+    found = brands.in_title(rec.get("title"))
+    return (found, "title") if found else (None, "none")
+
+
+# ---------------------------------------------------------------------------
+# Sizes
+# ---------------------------------------------------------------------------
+LETTER_SIZE = re.compile(r"(?<![A-Z0-9])(XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|2XL|3XL|4XL|5XL)(?![A-Z0-9])")
+EU_SIZE = re.compile(r"(?:\bEU\s*[:.]?\s*(\d{2}(?:[.,]5)?)\b)|(?:\b(\d{2}(?:[.,]5)?)\s*EU\b)", re.I)
+PLAIN_EU = re.compile(r"^\s*(?:maat|taglia|gr(?:ö|oe)?(?:ss|ß)e|taille|talla|size)?\s*[:.]?\s*(3[0-9]|4[0-9]|5[0-8])\s*$", re.I)
+
+
+def split_size(size: str | None) -> dict:
+    """'L - INT (Geschatte maat)' -> {internationalSize: 'L'}; 'EU 38' / 'Maat 38' -> {euSize: '38'}."""
+    s = str(size or "")
+    out = {}
+    m = LETTER_SIZE.search(s.upper())
+    if m:
+        out["internationalSize"] = m.group(1).replace("2XL", "XXL").replace("3XL", "XXXL")
+    e = EU_SIZE.search(s) or PLAIN_EU.search(s)
+    if e:
+        out["euSize"] = next(g for g in e.groups() if g).replace(",", ".")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -139,14 +259,19 @@ def category_of(rec: dict, job: dict | None) -> str | None:
     return _text((job or {}).get("category"), 120)
 
 
-def to_row(rec: dict, job: dict | None = None) -> tuple[dict | None, str | None]:
-    """One harvested record as a Stock bulk row. -> (row, None) or (None, why it cannot be one)."""
+def to_row(rec: dict, job: dict | None = None,
+           brands: BrandIndex | None = None) -> tuple[dict | None, str | None]:
+    """One harvested record as a Stock bulk row. -> (row, None) or (None, why it cannot be one).
+    With the Brand Master (`brands`), the brand is Stock's own spelling, and a listing without one gets the
+    brand its title names - only a brand Stock already has, never a guess."""
     url = rec.get("url") or ""
     if not url.startswith(("http://", "https://")):
         return None, "no product URL"
-    brand, title = _text(rec.get("brand"), 120), _text(rec.get("title"), 300)
+    title = _text(rec.get("title"), 300)
+    brand, brand_from = resolve_brand(rec, brands)
     if not brand:
-        return None, "no brand on the page"
+        return None, ("no brand on the page, none of the Brand Master's brands in the title" if brands is not None
+                      else "no brand on the page")
     if not title or len(title) < 2:
         return None, "no title"
     site = site_slug(rec.get("site"), url)
@@ -194,6 +319,10 @@ def to_row(rec: dict, job: dict | None = None) -> tuple[dict | None, str | None]
         if v in (None, "", [], {}):
             continue
         attrs[f"harvester_{k}"] = v if isinstance(v, (int, float, bool)) else _text(v, 2000)
+    if brand_from in ("title", "page-matched"):
+        attrs["harvester_brand_from"] = brand_from
+        if rec.get("brand") and _text(rec.get("brand"), 120) != brand:
+            attrs["harvester_brand_scraped"] = _text(rec.get("brand"), 120)
     attrs = dict(list(attrs.items())[:MAX_ATTRIBUTES])
 
     images = [u for u in (rec.get("image_urls") or rec.get("images") or [])
@@ -207,6 +336,7 @@ def to_row(rec: dict, job: dict | None = None) -> tuple[dict | None, str | None]
         "color": _text(rec.get("color"), 60), "materials": [material] if material else None,
         "description": _text(rec.get("description"), 10_000),
         "sizeOnLabel": _text(rec.get("size"), 80),
+        **split_size(rec.get("size")),
         "tags": [t for t in ("harvester", site, _text(rec.get("job"), 60), "resale" if resale else "retail") if t],
         "status": "ACTIVE", "images": images or None,
         "variants": variants or None, "prices": prices or None, "attributes": attrs or None,
@@ -268,7 +398,7 @@ def record(db, url, site, scraped_at, status, stock_code=None, code=None, error=
 
 
 def push(db, cfg: dict, *, dry_run: bool = False, retry_failed: bool = False, day: str | None = None,
-         poster=None) -> dict:
+         poster=None, brand_loader=None) -> dict:
     """Send the products to Stock, one call per site per batch. -> report with counts and failures."""
     scfg = stock_cfg(cfg)
     report = {"dry_run": dry_run, "products": 0, "sent": 0, "created": 0, "updated": 0, "would_create": 0,
@@ -278,13 +408,14 @@ def push(db, cfg: dict, *, dry_run: bool = False, retry_failed: bool = False, da
         return report
     poster = poster or post_bulk
     jobs = {j.get("name"): j for j in cfg.get("jobs", [])}
+    brands = brand_loader(scfg) if brand_loader else load_brands(scfg)
     by_site: dict[str, list[tuple[dict, dict]]] = {}
     for p in to_push(db, retry_failed, day):
         report["products"] += 1
         rec = json.loads(p["data"])
         rec.update({"url": p["url"], "job": p["job"], "source": p["source"], "scraped_at": p["scraped_at"],
                     "image_urls": json.loads(p.get("images") or "[]") or rec.get("images")})
-        row, why = to_row(rec, jobs.get(p["job"]))
+        row, why = to_row(rec, jobs.get(p["job"]), brands)
         site = site_slug(rec.get("site") or p.get("site"), p["url"])
         if not row:
             report["skipped"] += 1

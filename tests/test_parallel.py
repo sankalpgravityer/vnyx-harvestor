@@ -89,3 +89,31 @@ def test_parallel_1_is_the_old_one_after_another_run(monkeypatch, tmp_path):
     cfg = {"storage": {"dir": str(tmp_path)}, "jobs": JOBS, "stock": {"auto_push": False}}
     H.cmd_run(FakeCtx(cfg), argparse.Namespace(job=None, max=None, parallel=1))
     assert order == [j["name"] for j in JOBS]
+
+
+def test_rescrape_requeues_browser_products_and_the_push_resends_them(tmp_path):
+    import json as _json
+    from hv.db import DB
+    from hv import stock_push as SP
+
+    class Ctx:
+        pass
+
+    ctx = Ctx()
+    ctx.db = DB(str(tmp_path / "h.db"))
+    ctx.cfg = {"jobs": [{"name": "sellpy-jassen", "site": "https://www.sellpy.nl"},
+                        {"name": "pangaia-track-pants", "site": "https://pangaia.com"}]}
+    ctx.db.save_product({"url": "https://www.sellpy.nl/item/A", "site": "sellpy", "title": "t", "brand": "B",
+                         "images": ["bad.jpg"]}, "sellpy-jassen", "browser")
+    ctx.db.save_product({"url": "https://pangaia.com/products/x", "site": "pangaia", "title": "t", "brand": "Pangaia",
+                         "images": []}, "pangaia-track-pants", "shopify")
+    SP.ensure_table(ctx.db)
+    SP.record(ctx.db, "https://www.sellpy.nl/item/A", "sellpy", "2026-11-22T10:00:00+00:00", "created", "PRD_1")
+    H.cmd_rescrape(ctx, argparse.Namespace(job=None))
+    assert [p["url"] for p in ctx.db.products()] == ["https://pangaia.com/products/x"]      # shopify left alone
+    assert [q["url"] for q in ctx.db.pending("sellpy-jassen", 10)] == ["https://www.sellpy.nl/item/A"]
+    # read again -> newer scraped_at than the push record -> sent again (updates PRD_1)
+    ctx.db.save_product({"url": "https://www.sellpy.nl/item/A", "site": "sellpy", "title": "t", "brand": "B",
+                         "images": ["good.jpg"]}, "sellpy-jassen", "browser")
+    ctx.db.x("UPDATE products SET scraped_at='2999-01-01T00:00:00+00:00' WHERE url=?", ("https://www.sellpy.nl/item/A",))
+    assert "https://www.sellpy.nl/item/A" in [p["url"] for p in SP.to_push(ctx.db)]

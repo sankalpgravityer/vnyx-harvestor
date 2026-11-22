@@ -493,7 +493,8 @@ for (const img of document.querySelectorAll('img')) {
     dyn: img.getAttribute('data-a-dynamic-image'),
     alt: img.alt || null, testid: img.dataset.testid || null,
     w: img.naturalWidth, h: img.naturalHeight, rw: Math.round(r.width), rh: Math.round(r.height),
-    top: Math.round(r.top + window.scrollY), chrome: inChrome(img)
+    top: Math.round(r.top + window.scrollY), chrome: inChrome(img),
+    link: (img.closest('a[href]') || {}).href || null
   });
 }
 out.is_shopify = !!(window.Shopify && (window.Shopify.shop || window.Shopify.theme)) || !!document.querySelector('link[href*="cdn.shopify.com"], script[src*="cdn.shopify.com"]') || /\/cdn\/shop\//.test(document.documentElement.innerHTML.slice(0, 200000));
@@ -505,6 +506,39 @@ return out;
 # ----------------------------------------------------------------------------
 # Structured data parsing
 # ----------------------------------------------------------------------------
+
+def pick_main_product(products: list, url: str = "", title: str = ""):
+    """The JSON-LD product this page is about. A page often also describes the products it recommends
+    (Sellpy: 54 products for one item), so prefer the one whose url/@id is this page, then the one named
+    like the page's heading, then the first."""
+    if not products:
+        return None
+    path = urlparse(url or "").path.rstrip("/")
+    for p in products:
+        for k in ("url", "@id"):
+            v = p.get(k)
+            if isinstance(v, str) and path and urlparse(v).path.rstrip("/") == path:
+                return p
+    t = (title or "").strip().lower()
+    if t:
+        for p in products:
+            n = str(p.get("name") or "").strip().lower()
+            if n and (n in t or t in n):
+                return p
+    return products[0]
+
+
+def same_product(main: dict, other: dict) -> bool:
+    """Another JSON-LD product node that is a variant of the main one (ProductGroup), not a recommendation."""
+    if other is main:
+        return True
+    gid = main.get("productGroupID") or main.get("inProductGroupWithID")
+    if gid and gid in (other.get("productGroupID"), other.get("inProductGroupWithID")):
+        return True
+    if "productgroup" in str(main.get("@type")).lower():
+        return any(v is other for v in as_list(main.get("hasVariant")))
+    return False
+
 
 def parse_jsonld(raw_list):
     """Return (products, breadcrumbs, all_objects) from JSON-LD script texts."""
@@ -930,12 +964,25 @@ def upgrade_image_url(u: str) -> str:
     return u
 
 
+def _links_elsewhere(link: str | None, page_url: str) -> bool:
+    """An image inside a link to ANOTHER page is a tile of another product ("more from this seller",
+    "you may also like" ...) - a product's own gallery images are not links to other pages."""
+    if not link or link.startswith(("javascript:", "#")):
+        return False
+    a, b = urlparse(link), urlparse(page_url or "")
+    if re.search(r"\.(jpe?g|png|webp|avif|gif)(\?|$)", a.path, re.I):       # a link to the image itself (zoom)
+        return False
+    return (a.netloc, a.path.rstrip("/")) != (b.netloc, b.path.rstrip("/"))
+
+
 def pick_dom_images(page: dict, limit: int = 40) -> list[str]:
     """Fallback: pick large, non-decorative images from the top part of the page."""
     cands = []
     for i in page.get("images", []):
         url = i.get("lazy") or i.get("best") or i.get("src")
         if not url or url.startswith("data:") or url.endswith(".svg") or i.get("chrome"):
+            continue
+        if _links_elsewhere(i.get("link"), page.get("url") or ""):
             continue
         if BAD_IMG.search(url) or (i.get("alt") and BAD_IMG.search(i["alt"])):
             continue
@@ -956,6 +1003,7 @@ def _norm_img_key(u: str) -> str:
     path = re.sub(r"/image/\d+/\d+/", "/image/", p.path)                 # flipkart sizes
     path = re.sub(r"/(f\d+|s-l\d+|\d+x\d+|w_\d+[^/]*|h_\d+[^/]*)/", "/", path)
     path = re.sub(r"s-l\d+(\.\w+)$", r"s-l\1", path)                     # ebay s-l140.jpg vs s-l1600.jpg
+    path = re.sub(r"^/fit-in(?=/)", "", path)                             # resizer prefix (Sellpy CDN vs S3)
     return path
 
 
@@ -1083,7 +1131,8 @@ def scrape_product(driver, url: str, out_dir: str = "output", download: bool = T
 
     # 2) JSON-LD
     products, crumbs, ld_objs = parse_jsonld(page.get("jsonld"))
-    jrec = jsonld_to_record(products[0]) if products else {}
+    main = pick_main_product(products, page.get("url") or url, page.get("h1") or "")
+    jrec = jsonld_to_record(main) if main else {}
 
     # 3) meta / microdata / DOM
     meta, ip = page.get("meta", {}), page.get("itemprops", {})

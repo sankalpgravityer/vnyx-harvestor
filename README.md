@@ -95,6 +95,18 @@ STOCK_API_KEY=...                       # one of Stock's PRICING_API_KEYS
 | Shopify variants | `variants` (size, price, in stock) |
 | condition, seller, rating, job | `attributes` (`harvester_*`) |
 
+**Brands** are matched against Stock's Brand Master (read once per push through `GET /brands` with the same API
+key): punctuation and case are ignored (`Arcteryx` -> `Arc'teryx`), aliases count, and a listing that names no
+brand (Marktplaats, 2dehands, Subito ...) gets the Brand Master brand its title contains - only a brand Stock
+already has, never a guess (`attributes.harvester_brand_from = title`). **Sizes** are split: `L - INT` ->
+`internationalSize: L`, `EU 38` / `Maat 38` -> `euSize: 38`.
+
+Re-reading products already sent (e.g. after a scraper fix): `harvester.py rescrape [--job NAME]` puts them back in
+the queue, the next `run` reads them again, and its push updates the same Stock rows (images replaced).
+
+When a search page yields no products, a screenshot and the HTML are saved in `data/debug/` to see what the site
+served.
+
 Each site is its own Stock source, `upload:harvester-<site>`. **A product whose brand is not in Stock's Brand
 Master is refused** (`BRAND_NOT_FOUND`), logged, and not sent again until `--retry-failed`. What reached Stock (PRD
 code or the reason it did not) is kept in `data/harvester.db`, table `stock_push`. `stock.auto_push: false` in
