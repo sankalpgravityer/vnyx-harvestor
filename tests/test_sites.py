@@ -68,3 +68,18 @@ jobs:
     cfg = H.load_config(str(p))
     assert cfg["site_proxies"] == {"etsy.com": "http://resi:1"}
     assert cfg["site_politeness"] == {"grailed.com": {"min_delay": 40, "max_delay": 90}}
+
+
+def test_browser_caches_are_deleted_and_cookies_kept(tmp_path):
+    from hv.net import purge_profile_cache
+    prof = tmp_path / "vinted.nl"
+    for p, size in [("Default/Cache/Cache_Data/f_000001", 4000), ("Default/Code Cache/js/abc", 3000),
+                    ("Default/Service Worker/CacheStorage/x/y", 2000), ("Default/Cookies", 100),
+                    ("Default/Local Storage/leveldb/000003.log", 50), ("GrShaderCache/data_0", 1000)]:
+        f = prof / p
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"x" * size)
+    assert purge_profile_cache(str(prof)) == 10000
+    assert (prof / "Default/Cookies").exists() and (prof / "Default/Local Storage/leveldb/000003.log").exists()
+    assert not (prof / "Default/Cache").exists() and not (prof / "GrShaderCache").exists()
+    assert purge_profile_cache(str(tmp_path / "missing")) == 0

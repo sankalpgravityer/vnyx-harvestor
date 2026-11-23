@@ -82,6 +82,38 @@ class Http:
         return r.status_code, r.text
 
 
+# Chrome's caches inside a site's profile (23 Nov 2026: 12 sites x 5 runs a day grew data/profiles to 2.6 GB and
+# filled the server's 20 GB disk). Cookies, local storage and the logged-in state - what makes one consistent
+# "visitor" per site - live elsewhere in the profile and are kept.
+CACHE_DIRS = {"Cache", "Code Cache", "GPUCache", "GrShaderCache", "GraphiteDawnCache", "ShaderCache",
+              "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "CacheStorage", "ScriptCache",
+              "Crashpad", "BrowserMetrics", "optimization_guide_model_store", "component_crx_cache",
+              "OnDeviceHeadSuggestModel", "Safe Browsing", "segmentation_platform"}
+
+
+def purge_profile_cache(profile_dir: str) -> int:
+    """Delete the cache folders in one Chrome profile. -> bytes freed. Never raises."""
+    import shutil
+    freed = 0
+    if not os.path.isdir(profile_dir):
+        return 0
+    for root, dirs, _files in os.walk(profile_dir, topdown=True):
+        for d in list(dirs):
+            if d in CACHE_DIRS:
+                path = os.path.join(root, d)
+                for r2, _d2, f2 in os.walk(path):
+                    for f in f2:
+                        try:
+                            freed += os.path.getsize(os.path.join(r2, f))
+                        except OSError:
+                            pass
+                shutil.rmtree(path, ignore_errors=True)
+                dirs.remove(d)
+    if freed > 50_000_000:
+        log.info("browser cache cleared for %s: %.0f MB", os.path.basename(profile_dir), freed / 1e6)
+    return freed
+
+
 # Chrome is started one at a time: SeleniumBase's UC mode patches its driver file at launch, and two threads
 # patching it together can corrupt it. Pages then load in parallel.
 _LAUNCH_LOCK = threading.Lock()
@@ -182,6 +214,8 @@ class Browser:
                 self.driver.quit()
             except Exception:
                 pass
+            if self.domain:
+                purge_profile_cache(os.path.join(self.profiles_dir, re.sub(r"[^a-z0-9.-]", "_", self.domain)))
         self.driver, self.domain, self.pages = None, None, 0
 
     def shutdown(self):

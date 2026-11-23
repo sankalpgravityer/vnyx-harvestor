@@ -10,6 +10,7 @@ Product harvester - headless, scheduled, polite multi-site product scraper for a
   python harvester.py status           # quotas, cooldowns, block events, what reached Stock
   python harvester.py push --dry-run   # send products to the Stock API (bulk upload) - dry run: validate only
   python harvester.py push             # send products not sent yet (also runs after every `run`)
+  python harvester.py cleanup          # delete the browser caches in every site profile (keeps cookies)
   python harvester.py rescrape --job sellpy-jassen   # read already-harvested products again (next run),
                                        # then the push updates their Stock rows (default: every browser job)
 
@@ -389,6 +390,14 @@ def cmd_rescrape(ctx, a):
              "(or --job) to take them", len(rows), json.dumps(by_job))
 
 
+def cmd_cleanup(ctx, a):
+    """Delete the browser caches in every site profile now (they are also cleared after every browser closes)."""
+    from hv.net import purge_profile_cache
+    d = os.path.join(ctx.cfg["storage"]["dir"], "profiles")
+    total = sum(purge_profile_cache(os.path.join(d, p)) for p in (os.listdir(d) if os.path.isdir(d) else []))
+    log.info("cleanup: %.0f MB of browser cache deleted from %s", total / 1e6, d)
+
+
 def cmd_status(ctx, a):
     print(f"\nToday ({today()}): {ctx.db.count_today()} / {ctx.cfg.get('daily_total_limit', 200)} products\n")
     for j in ctx.cfg.get("jobs", []):
@@ -413,7 +422,7 @@ def cmd_status(ctx, a):
 
 def main():
     ap = argparse.ArgumentParser(description="Polite headless multi-site product harvester")
-    ap.add_argument("command", choices=["run", "check", "export", "status", "push", "rescrape"])
+    ap.add_argument("command", choices=["run", "check", "export", "status", "push", "rescrape", "cleanup"])
     ap.add_argument("--config", "-c", default=os.path.join(ROOT, "config.yaml"))
     ap.add_argument("--job", help="only this job")
     ap.add_argument("--max", type=int, help="at most N products per job in this run")
@@ -428,7 +437,7 @@ def main():
     setup_logging(cfg, a.verbose)
     ctx = Ctx(cfg)
     {"run": cmd_run, "check": cmd_check, "export": cmd_export, "status": cmd_status,
-     "push": cmd_push, "rescrape": cmd_rescrape}[a.command](ctx, a)
+     "push": cmd_push, "rescrape": cmd_rescrape, "cleanup": cmd_cleanup}[a.command](ctx, a)
 
 
 if __name__ == "__main__":
