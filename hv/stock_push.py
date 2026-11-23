@@ -3,8 +3,9 @@
 The harvester keeps what it scrapes in its own SQLite (hv/db.py). This module sends those products to the
 Stock API through its existing bulk upload - no direct database access, nothing to change on Stock's side:
 
-  * one Stock source per site: upload:harvester-<site> ("Harvester - vinted"), so harvested rows are easy to
-    find, filter or remove later;
+  * one Stock source per website, the same one Stock's other writers use: "vinted" / "Vinted", "ebay" / "eBay"
+    (23 Nov 2026; was upload:harvester-<site> "Harvester - vinted"). Harvested rows still carry the tag
+    "harvester", so they can be found, filtered or removed later;
   * keyed on `externalId` = <site>:<item id> (else the product URL): a product scraped again updates its row
     instead of making a second one;
   * prices go in as price evidence: resale sites (Vinted, Grailed, eBay used ...) as RESALE_ASKING, shops
@@ -347,12 +348,29 @@ def to_row(rec: dict, job: dict | None = None,
 # ---------------------------------------------------------------------------
 # Posting
 # ---------------------------------------------------------------------------
+# The website's name as Stock shows its source. Stock maps the key to its one source per site
+# (stock-vnyx-api src/services/source-canonical.ts); an unknown site keeps its own.
+SITE_NAMES = {
+    "vinted": "Vinted", "grailed": "Grailed", "depop": "Depop", "ebay": "eBay", "poshmark": "Poshmark",
+    "vestiairecollective": "Vestiaire Collective", "vestiaire": "Vestiaire Collective",
+    "kleinanzeigen": "Kleinanzeigen", "marktplaats": "Marktplaats", "2dehands": "2dehands", "sellpy": "Sellpy",
+    "subito": "Subito", "pangaia": "Pangaia", "zalando": "Zalando", "etsy": "Etsy", "mercari": "Mercari",
+    "thredup": "thredUP", "wallapop": "Wallapop", "tise": "Tise", "stockx": "StockX", "klekt": "Klekt",
+}
+
+
+def stock_source(site: str) -> dict:
+    """The Stock source of a site: {"key": "vinted", "name": "Vinted"}."""
+    key = re.sub(r"[^a-z0-9]+", "-", (site or "").lower()).strip("-") or "harvester"
+    return {"key": key[:60], "name": (SITE_NAMES.get(key) or site.strip().title() or "Harvester")[:120]}
+
+
 def post_bulk(scfg: dict, site: str, rows: list[dict], dry_run: bool, session=None) -> dict:
     """POST /products/bulk for one site's rows. Retries a network error / 5xx three times; a 4xx is final.
     -> {"ok": True, "data": {...}} or {"ok": False, "error": "..."}."""
     http = session or requests
     body = {"products": rows, "dryRun": dry_run,
-            "source": {"key": f"harvester-{site}"[:60], "name": f"Harvester - {site}"[:120]}}
+            "source": stock_source(site)}
     last = ""
     for attempt in range(4):
         try:

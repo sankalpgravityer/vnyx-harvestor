@@ -137,7 +137,7 @@ def test_post_bulk_sends_the_key_source_and_rows():
 
     r = SP.post_bulk({"url": "https://stock.test", "api_key": "stk"}, "vinted", [{"brand": "x"}], True, Session())
     assert r["ok"] and seen["url"] == "https://stock.test/products/bulk" and seen["headers"]["x-api-key"] == "stk"
-    assert seen["body"]["source"] == {"key": "harvester-vinted", "name": "Harvester - vinted"}
+    assert seen["body"]["source"] == {"key": "vinted", "name": "Vinted"}   # one Stock source per website
     assert seen["body"]["dryRun"] is True
 
 
@@ -206,3 +206,11 @@ def test_the_brand_master_is_read_page_by_page_and_a_refusal_means_none():
             return R(401, {})
 
     assert SP.load_brands({"url": "https://stock.test", "api_key": "stk"}, Deny()) is None
+
+
+def test_each_site_is_sent_as_its_website_source_never_harvester_x():
+    assert SP.stock_source("vinted") == {"key": "vinted", "name": "Vinted"}
+    assert SP.stock_source("vestiairecollective") == {"key": "vestiairecollective", "name": "Vestiaire Collective"}
+    assert SP.stock_source("2dehands") == {"key": "2dehands", "name": "2dehands"}
+    assert SP.stock_source("someshop") == {"key": "someshop", "name": "Someshop"}
+    assert "harvester" not in SP.stock_source("depop")["name"].lower()
